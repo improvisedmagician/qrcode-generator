@@ -24,3 +24,9 @@ Thumbs.db
 
 # Vercel
 .vercel/
+
+# PyInstaller builds
+build/
+dist/
+*.spec
+.pytest_local_db.json

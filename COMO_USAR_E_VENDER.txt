@@ -1,0 +1,55 @@
+================================================================================
+GUIA COMERCIAL: COMO VENDER E USAR O GERADOR DE QR CODE EM QUALQUER COMPUTADOR
+================================================================================
+
+Parabéns! O seu sistema foi transformado em um aplicativo autônomo comercial.
+Ele roda em qualquer computador com Windows (10, 11 e Server) sem necessidade
+de instalar Python, VS Code, Git ou qualquer outro programa.
+
+--------------------------------------------------------------------------------
+1. O QUE VOCÊ ENVIA PARA O SEU CLIENTE
+--------------------------------------------------------------------------------
+Você só precisa enviar a pasta contendo:
+  - GeradorDeQRCode.exe (localizado na pasta dist/)
+  - Criar_Atalho_Area_de_Trabalho.bat (opcional, para conveniência do cliente)
+
+Ou você pode enviar simplesmente o arquivo único "GeradorDeQRCode.exe".
+
+--------------------------------------------------------------------------------
+2. COMO O CLIENTE USA NO COMPUTADOR DELE (PASSO A PASSO)
+--------------------------------------------------------------------------------
+1. O cliente dá 2 CLIQUES no "GeradorDeQRCode.exe" (ou clica no atalho da Área de Trabalho).
+2. O sistema abre sozinho o navegador de internet dele (Google Chrome, Microsoft Edge, etc.)
+   com a tela do Gerador pronta para usar.
+3. O cliente digita o link final de destino (ex: cardápio, site, WhatsApp, Instagram).
+4. O cliente escolhe as cores, moldura ("ESCANEIE AQUI") e estilo.
+5. O cliente clica em "Baixar SVG", "Baixar PNG" ou "Baixar PDF" e envia para a gráfica.
+6. Uma vez impresso, o QR Code continuará funcionando PARA SEMPRE, sem precisar
+   do computador ligado nem de internet para a leitura.
+
+--------------------------------------------------------------------------------
+3. BENEFÍCIOS PARA VENDER:
+--------------------------------------------------------------------------------
+- 100% OFFLINE E SEGURO: Não depende de servidores terceiros que podem cair.
+- PERSISTÊNCIA AUTOMÁTICA: Todos os QR Codes criados ficam salvos no computador do
+  cliente (%LOCALAPPDATA%\GeradorQRCode\qrcodes_db.json). Ao fechar e abrir no outro
+  dia, todos os códigos continuam lá.
+- PORTABILIDADE: Funciona até colocado dentro de um Pen Drive.
+- ALTA QUALIDADE GRÁFICA: Exporta em vetor SVG para gráficas e PNG em 2048px ultra nítido.
+
+--------------------------------------------------------------------------------
+4. SE VOCÊ PREFERIR VENDER COMO ACESSO ONLINE (SEM DOWNLOAD):
+--------------------------------------------------------------------------------
+Lembre-se de que o sistema também continua funcionando online na Vercel:
+  https://qrcode-generator-inky.vercel.app/
+
+Você pode vender tanto a licença do programa desktop (.exe) quanto o acesso web!
+
+--------------------------------------------------------------------------------
+5. COMO GERAR UM NOVO .EXE NO FUTURO (SE VOCÊ FIZER ALTERAÇÕES):
+--------------------------------------------------------------------------------
+Basta abrir o terminal nesta pasta e executar:
+  .\.venv\Scripts\python.exe build_exe.py
+
+O novo executável atualizado será gerado automaticamente na pasta "dist/".
+================================================================================

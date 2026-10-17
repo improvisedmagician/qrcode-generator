@@ -159,6 +159,55 @@ IN_MEMORY_DB: dict[str, dict] = {
 # Sincroniza em Redis sob múltiplos hostnames para tolerância total
 KNOWN_HOSTS = ["localhost", "127.0.0.1", "0.0.0.0", LAN_IP]
 
+# Persistência local em arquivo JSON (para modo Desktop offline / qualquer máquina sem internet ou Redis)
+def get_local_db_path() -> Path:
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        return Path(__file__).resolve().parent / ".pytest_local_db.json"
+    app_data = os.getenv("LOCALAPPDATA") or os.getenv("APPDATA")
+    if app_data:
+        base_dir = Path(app_data) / "GeradorQRCode"
+    else:
+        base_dir = Path.home() / ".gerador_qrcode"
+    try:
+        base_dir.mkdir(parents=True, exist_ok=True)
+        return base_dir / "qrcodes_db.json"
+    except Exception:
+        return Path("qrcodes_db.json")
+
+LOCAL_DB_FILE = get_local_db_path()
+
+def save_local_db():
+    if IS_SERVERLESS:
+        return
+    try:
+        data_to_save = {
+            "qrcodes": {k: v for k, v in IN_MEMORY_DB.items() if k not in DELETED_SLUGS},
+            "deleted": list(DELETED_SLUGS),
+        }
+        with open(LOCAL_DB_FILE, "w", encoding="utf-8") as f:
+            json.dump(data_to_save, f, ensure_ascii=False, indent=2)
+    except Exception as exc:
+        log.warning("Falha ao salvar banco local em %s: %r", LOCAL_DB_FILE, exc)
+
+def load_local_db():
+    if IS_SERVERLESS or not LOCAL_DB_FILE.exists():
+        return
+    try:
+        with open(LOCAL_DB_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        saved_qrcodes = data.get("qrcodes", {})
+        saved_deleted = set(data.get("deleted", []))
+        DELETED_SLUGS.update(saved_deleted)
+        for s_slug, s_payload in saved_qrcodes.items():
+            if s_slug not in DELETED_SLUGS:
+                IN_MEMORY_DB[s_slug] = s_payload
+        log.info("Banco local carregado com sucesso de %s (%d códigos)", LOCAL_DB_FILE, len(saved_qrcodes))
+    except Exception as exc:
+        log.warning("Falha ao carregar banco local de %s: %r", LOCAL_DB_FILE, exc)
+
+# Carrega códigos gravados localmente no computador
+load_local_db()
+
 # Recupera túmulos de exclusão salvos no Redis para persistência inter-instâncias
 if redis_sync:
     try:
@@ -185,6 +234,7 @@ def sync_redis_slug(slug: str, payload: dict):
             redis_sync.set(f"qr_meta:{clean}", payload_str)
         except Exception as exc:
             log.warning("Falha ao sincronizar slug %s no Redis: %r", clean, exc)
+    save_local_db()
 
 for slug, payload in list(IN_MEMORY_DB.items()):
     if slug not in DELETED_SLUGS:
@@ -1886,6 +1936,7 @@ async def delete_qr_api(slug: str, request: Request):
     DELETED_SLUGS.add(clean_slug)
     IN_MEMORY_DB.pop(clean_slug, None)
     SCAN_COUNTS.pop(clean_slug, None)
+    save_local_db()
 
     current_host = request.headers.get("host", "").split(":")[0].lower()
     hosts_to_sync = set(KNOWN_HOSTS + [current_host])
@@ -2282,18 +2333,55 @@ async def redirect_endpoint(slug: str, request: Request):
     )
 
 
+def find_available_port(start_port: int = 8000, max_attempts: int = 50) -> int:
+    import socket
+    for p in range(start_port, start_port + max_attempts):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(("127.0.0.1", p))
+                return p
+        except OSError:
+            continue
+    return start_port
+
+
+def open_browser_later(url: str, delay_sec: float = 1.2):
+    import threading
+    import time
+    import webbrowser
+
+    def _open():
+        time.sleep(delay_sec)
+        try:
+            webbrowser.open(url)
+        except Exception:
+            pass
+
+    threading.Thread(target=_open, daemon=True).start()
+
+
 def main():
     import uvicorn
-    port = int(os.getenv("PORT", "80"))
-    port_suffix = f":{port}" if port not in (80, 443) else ""
+    raw_port = os.getenv("PORT")
+    if raw_port:
+        port = int(raw_port)
+    else:
+        port = find_available_port(8000)
+
+    url = f"http://localhost:{port}"
     print("\n" + "=" * 70)
-    print(">>> PAINEL CORPORATIVO MODERNO ONLINE (RESPONSIVO & COMPACTO)")
+    print(">>> GERADOR DE QR CODE ESTÁTICO & PERMANENTE (MODO DESKTOP)")
     print("=" * 70)
-    print(f"-> Painel Web no Navegador: http://localhost{port_suffix}")
+    print(f"-> Abrindo painel automaticamente no seu navegador: {url}")
     if LAN_IP and LAN_IP != "127.0.0.1":
-        print(f"-> Acesso via Celular (Wi-Fi): http://{LAN_IP}{port_suffix}")
+        print(f"-> Acesso via Celular (mesma rede Wi-Fi): http://{LAN_IP}:{port}")
+    print("=" * 70)
+    print(f"-> Banco de dados local: {LOCAL_DB_FILE}")
+    print("-> Para encerrar o programa, basta fechar esta janela.")
     print("=" * 70 + "\n")
-    uvicorn.run(app, host="0.0.0.0", port=port, access_log=True)
+
+    open_browser_later(url)
+    uvicorn.run(app, host="0.0.0.0", port=port, access_log=False)
 
 
 if __name__ == "__main__":
