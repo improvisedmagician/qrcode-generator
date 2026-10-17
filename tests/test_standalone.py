@@ -78,7 +78,7 @@ def client():
 def test_dashboard_index(client):
     resp = client.get("/")
     assert resp.status_code == 200
-    assert "QR Dinâmico" in resp.text
+    assert "QR Estático" in resp.text
     assert "escapeHtml" in resp.text
     assert "escapeJs" in resp.text
     assert "sanitizeUrl" in resp.text
@@ -177,8 +177,8 @@ def test_redirect_302_and_scan_capture(client):
 
 
 def test_preview_and_export(client):
-    # Live preview
-    resp_live = client.get("/api/preview-live?slug=test&color=%230F172A")
+    # Live preview com URL de destino direta
+    resp_live = client.get("/api/preview-live?slug=test&url=https%3A%2F%2Fmeusite.com%2Fcardapio&color=%230F172A")
     assert resp_live.status_code == 200
     assert resp_live.headers["content-type"] == "image/svg+xml"
     assert "<svg" in resp_live.text
@@ -269,7 +269,7 @@ def test_vercel_entrypoint_import():
     with TestClient(vercel_app) as vc:
         resp = vc.get("/")
         assert resp.status_code == 200
-        assert "QR Dinâmico" in resp.text
+        assert "QR Estático" in resp.text
 
 
 def test_serverless_scan_enrichment(monkeypatch, client):

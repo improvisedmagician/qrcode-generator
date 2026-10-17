@@ -330,7 +330,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-  <title>QR Dinâmico — Gestão Corporativa de Links</title>
+  <title>QR Code Estático — Estúdio de Criação Permanente</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -368,18 +368,16 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
           <i class="fa-solid fa-qrcode"></i>
         </div>
         <div class="flex items-center space-x-2">
-          <span class="font-bold text-sm tracking-tight text-zinc-900">QR Dinâmico</span>
-          <span class="hidden sm:inline-block text-[9px] font-bold uppercase tracking-wider bg-zinc-100 text-zinc-600 px-1.5 py-0.5 rounded border border-zinc-200">Enterprise</span>
+          <span class="font-bold text-sm tracking-tight text-zinc-900">QR Estático</span>
+          <span class="hidden sm:inline-block text-[9px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded border border-emerald-200">100% Permanente</span>
         </div>
       </div>
-
-
 
       <!-- Botões de Ação -->
       <div class="flex items-center space-x-1.5 sm:space-x-2 shrink-0">
         <div class="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/60">
-          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block shadow-[0_0_6px_rgba(16,185,129,0.8)]"></span>
-          Cluster &lt; 5ms
+          <i class="fa-solid fa-infinity text-emerald-600 text-[10px]"></i>
+          Sem Servidor • Nunca Expira
         </div>
 
         <!-- Seletor de Fundo do Dashboard -->
@@ -451,44 +449,62 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   <!-- Container Principal -->
   <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-5">
 
-    <!-- KPI Strip Compacta (Densidade Otimizada) -->
+    <!-- KPI Strip: Métricas de Segurança e Produção Gráfica -->
     <section class="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
       <div class="bg-white p-3 sm:p-3.5 rounded-xl border border-zinc-200/80 shadow-2xs flex items-center justify-between">
         <div>
-          <span class="text-[11px] font-medium text-zinc-400 block">Total de Scans</span>
+          <span class="text-[11px] font-medium text-zinc-400 block">Total de Códigos</span>
           <span id="kpi-total" class="text-xl sm:text-2xl font-bold text-zinc-900 tracking-tight">0</span>
         </div>
-        <span class="text-[10px] text-emerald-600 font-semibold bg-emerald-50 px-2 py-0.5 rounded-md flex items-center gap-1">
-          <i class="fa-solid fa-bolt text-[9px]"></i> Ao vivo
+        <span class="text-[10px] text-zinc-600 font-semibold bg-zinc-100 px-2 py-0.5 rounded-md flex items-center gap-1">
+          <i class="fa-solid fa-layer-group text-[9px] text-indigo-600"></i> Salvos
         </span>
       </div>
 
       <div class="bg-white p-3 sm:p-3.5 rounded-xl border border-zinc-200/80 shadow-2xs flex items-center justify-between">
         <div>
-          <span class="text-[11px] font-medium text-zinc-400 block">Visitantes Únicos</span>
-          <span id="kpi-unicos" class="text-xl sm:text-2xl font-bold text-zinc-900 tracking-tight">0</span>
+          <span class="text-[11px] font-medium text-zinc-400 block">Tipo de Código</span>
+          <span class="text-xl sm:text-2xl font-bold text-zinc-900 tracking-tight">Estático</span>
         </div>
-        <span class="text-[10px] text-zinc-500 font-medium bg-zinc-100 px-2 py-0.5 rounded-md flex items-center gap-1">
-          <i class="fa-solid fa-shield-halved text-[9px]"></i> LGPD
+        <span class="text-[10px] text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded-md flex items-center gap-1">
+          <i class="fa-solid fa-infinity text-[9px] text-emerald-600"></i> Permanente
         </span>
       </div>
 
       <div class="bg-white p-3 sm:p-3.5 rounded-xl border border-zinc-200/80 shadow-2xs flex items-center justify-between">
         <div>
-          <span class="text-[11px] font-medium text-zinc-400 block">Taxa Mobile</span>
-          <span id="kpi-mobile" class="text-xl sm:text-2xl font-bold text-zinc-900 tracking-tight">0%</span>
+          <span class="text-[11px] font-medium text-zinc-400 block">Dependência de PC</span>
+          <span class="text-xl sm:text-2xl font-bold text-emerald-600 tracking-tight">Zero (Offline)</span>
         </div>
-        <span class="text-[10px] text-zinc-500 font-medium bg-zinc-100 px-2 py-0.5 rounded-md flex items-center gap-1">
-          <i class="fa-solid fa-mobile-screen text-[9px]"></i> Celular
+        <span class="text-[10px] text-emerald-700 font-medium bg-emerald-50 px-2 py-0.5 rounded-md flex items-center gap-1">
+          <i class="fa-solid fa-shield-check text-[9px]"></i> Imune a Quedas
         </span>
       </div>
 
       <div class="bg-white p-3 sm:p-3.5 rounded-xl border border-zinc-200/80 shadow-2xs flex items-center justify-between">
         <div>
-          <span class="text-[11px] font-medium text-zinc-400 block">Latência 302</span>
-          <span class="text-xl sm:text-2xl font-bold text-emerald-600 tracking-tight">&lt; 5ms</span>
+          <span class="text-[11px] font-medium text-zinc-400 block">Qualidade Gráfica</span>
+          <span class="text-xl sm:text-2xl font-bold text-zinc-900 tracking-tight">Vetor & Alta Res</span>
         </div>
-        <span class="text-[10px] text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded-md">L1 Cache</span>
+        <span class="text-[10px] text-indigo-700 font-semibold bg-indigo-50 px-2 py-0.5 rounded-md">SVG • PNG • PDF</span>
+      </div>
+    </section>
+
+    <!-- Banner Informativo de Segurança para Impressão -->
+    <section class="bg-white rounded-xl border border-emerald-200/80 bg-gradient-to-r from-emerald-50/50 via-white to-indigo-50/30 p-3.5 sm:p-4 shadow-2xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-xl bg-emerald-500 text-white flex items-center justify-center text-sm shadow-xs shrink-0">
+          <i class="fa-solid fa-shield-check"></i>
+        </div>
+        <div>
+          <h4 class="font-bold text-zinc-900 text-xs sm:text-sm">Código 100% Permanente e Seguro para Impressão</h4>
+          <p class="text-zinc-600 text-[11px] mt-0.5">O link de destino é gravado diretamente no desenho do QR Code. Uma vez impresso, a câmera do celular abre o destino na hora, sem passar por servidor. Você pode desligar o computador ou ficar sem internet que o material impresso continuará funcionando para sempre.</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2 shrink-0">
+        <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white text-zinc-800 font-semibold text-[11px] border border-zinc-200 shadow-2xs">
+          <i class="fa-solid fa-print text-indigo-600"></i> Padrão Gráfico
+        </span>
       </div>
     </section>
 
@@ -498,15 +514,13 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       <!-- Busca rápida -->
       <div class="relative flex-1 max-w-sm">
         <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-xs text-zinc-400"></i>
-        <input type="text" id="filtro-busca" oninput="filtrarQRs()" placeholder="Buscar por nome, slug ou URL..." class="w-full text-xs bg-white rounded-xl border border-zinc-200/80 pl-8 pr-3 py-2 outline-none focus:border-zinc-400 focus:ring-1 focus:ring-zinc-400 transition">
+        <input type="text" id="filtro-busca" oninput="filtrarQRs()" placeholder="Buscar por nome ou URL de destino..." class="w-full text-xs bg-white rounded-xl border border-zinc-200/80 pl-8 pr-3 py-2 outline-none focus:border-zinc-400 focus:ring-1 focus:ring-zinc-400 transition">
       </div>
 
-      <!-- Filtros de Status + Toggle Grid/Lista -->
+      <!-- Filtros e Alternância Grid/Lista -->
       <div class="flex items-center justify-between sm:justify-end gap-2">
         <div class="flex items-center space-x-1 bg-zinc-100 p-0.5 rounded-lg border border-zinc-200 text-xs">
-          <button onclick="definirFiltroStatus('all')" id="btn-filtro-all" class="font-semibold px-2.5 py-1 rounded-md bg-white text-zinc-900 shadow-2xs transition">Todos (<span id="count-all">0</span>)</button>
-          <button onclick="definirFiltroStatus('active')" id="btn-filtro-active" class="font-medium px-2.5 py-1 rounded-md text-zinc-600 hover:text-zinc-900 transition">Ativos</button>
-          <button onclick="definirFiltroStatus('paused')" id="btn-filtro-paused" class="font-medium px-2.5 py-1 rounded-md text-zinc-600 hover:text-zinc-900 transition">Pausados</button>
+          <span class="font-semibold px-2.5 py-1 text-zinc-800">Todos os Códigos (<span id="count-all">0</span>)</span>
         </div>
 
         <div class="flex items-center space-x-1 bg-zinc-100 p-0.5 rounded-lg border border-zinc-200 text-xs">
@@ -526,37 +540,6 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       <div id="qr-list" class="hidden bg-white rounded-xl border border-zinc-200/80 shadow-2xs divide-y divide-zinc-100 overflow-hidden"></div>
     </section>
 
-    <!-- Painel de Telemetria ao Vivo (Compacto e Expansível) -->
-    <section class="bg-white rounded-xl border border-zinc-200/80 shadow-2xs overflow-hidden">
-      <div class="px-4 py-2.5 border-b border-zinc-100 flex items-center justify-between bg-zinc-50/60">
-        <div class="flex items-center space-x-2">
-          <span class="w-2 h-2 rounded-full bg-emerald-500 inline-block shadow-[0_0_8px_rgba(16,185,129,0.7)]"></span>
-          <h3 class="text-xs font-bold text-zinc-900 uppercase tracking-wider">Telemetria de Scans em Tempo Real</h3>
-        </div>
-        <span class="text-[10px] text-zinc-400 font-mono">Worker Redis Streams • LGPD Hash</span>
-      </div>
-
-      <div class="overflow-x-auto max-h-52 overflow-y-auto">
-        <table class="w-full text-left text-xs">
-          <thead class="bg-zinc-50/90 text-zinc-500 font-semibold sticky top-0 border-b border-zinc-100 z-10 text-[11px]">
-            <tr>
-              <th class="px-4 py-2">Horário</th>
-              <th class="px-4 py-2">Slug</th>
-              <th class="px-4 py-2">Destino Final</th>
-              <th class="px-4 py-2">Dispositivo</th>
-              <th class="px-4 py-2">SO & Navegador</th>
-              <th class="px-4 py-2">Visitante Único</th>
-            </tr>
-          </thead>
-          <tbody id="scans-tbody" class="divide-y divide-zinc-100 text-zinc-600 font-mono text-[11px]">
-            <tr>
-              <td colspan="6" class="px-4 py-6 text-center text-zinc-400 font-sans text-xs">Aguardando novos scans...</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
-
   </main>
 
   <!-- Modal CRUD: Criar / Editar QR Code (Responsivo, max-h-88vh, sem cortes) -->
@@ -565,7 +548,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       
       <!-- Modal Header (Fixo) -->
       <div class="px-5 py-3 border-b border-zinc-100 flex items-center justify-between bg-zinc-50/70 shrink-0">
-        <h3 id="modal-titulo" class="font-bold text-zinc-900 text-sm">Novo QR Code Dinâmico</h3>
+        <h3 id="modal-titulo" class="font-bold text-zinc-900 text-sm">Novo QR Code Estático</h3>
         <button onclick="fecharModal()" class="w-7 h-7 rounded-lg hover:bg-zinc-200/60 text-zinc-400 hover:text-zinc-700 flex items-center justify-center transition">
           <i class="fa-solid fa-xmark text-sm"></i>
         </button>
@@ -582,23 +565,23 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
             <!-- Coluna Esquerda: Formulário (7 colunas) -->
             <div class="md:col-span-7 space-y-3">
               <div>
-                <label class="block text-[11px] font-semibold text-zinc-700 mb-0.5">Nome da Campanha</label>
-                <input type="text" id="input-nome" required placeholder="Ex: Catálogo Digital" class="w-full text-xs rounded-lg border border-zinc-200 px-3 py-2 outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 transition" oninput="atualizarPreviewLive()">
+                <label class="block text-[11px] font-semibold text-zinc-700 mb-0.5">Nome do QR Code</label>
+                <input type="text" id="input-nome" required placeholder="Ex: Cardápio Mesa 1, Instagram Oficial" class="w-full text-xs rounded-lg border border-zinc-200 px-3 py-2 outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 transition" oninput="atualizarPreviewLive()">
               </div>
 
               <div>
-                <label class="block text-[11px] font-semibold text-zinc-700 mb-0.5">Slug Curto (Identificador)</label>
+                <label class="block text-[11px] font-semibold text-zinc-700 mb-0.5">Identificador Interno (Apelido)</label>
                 <div class="flex items-center">
                   <span class="text-xs bg-zinc-100 border border-r-0 border-zinc-200 px-2.5 py-2 rounded-l-lg text-zinc-500 font-mono">/</span>
-                  <input type="text" id="input-slug" required placeholder="catalogo" class="w-full text-xs rounded-r-lg border border-zinc-200 px-3 py-2 outline-none font-mono focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 transition" oninput="sanitizarSlug(this)">
+                  <input type="text" id="input-slug" required placeholder="cardapio-mesa" class="w-full text-xs rounded-r-lg border border-zinc-200 px-3 py-2 outline-none font-mono focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 transition" oninput="sanitizarSlug(this)">
                 </div>
-                <span class="text-[10px] text-zinc-400">Apenas letras, números, hífen e underline.</span>
+                <span class="text-[10px] text-zinc-400">Usado para nomear seus arquivos SVG/PNG e organizar seus códigos.</span>
               </div>
 
               <div>
-                <label class="block text-[11px] font-semibold text-zinc-700 mb-0.5">URL de Destino</label>
-                <input type="url" id="input-url" required placeholder="https://meusite.com.br/produtos" class="w-full text-xs rounded-lg border border-zinc-200 px-3 py-2 outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 transition">
-                <span class="text-[10px] text-zinc-400">Pode ser alterada a qualquer momento sem reimprimir.</span>
+                <label class="block text-[11px] font-semibold text-zinc-700 mb-0.5">URL de Destino Definitiva</label>
+                <input type="url" id="input-url" required placeholder="https://instagram.com/sua-loja" class="w-full text-xs rounded-lg border border-zinc-200 px-3 py-2 outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 transition" oninput="atualizarPreviewLive()">
+                <span class="text-[10px] text-emerald-600 font-medium">Esta URL será gravada diretamente na matriz do QR Code. 100% permanente e sem servidor.</span>
               </div>
 
               <div>
@@ -684,11 +667,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
               </div>
 
               <div id="campo-status" class="hidden">
-                <label class="block text-[11px] font-semibold text-zinc-700 mb-0.5">Status do Link</label>
-                <select id="input-status" class="w-full text-xs rounded-lg border border-zinc-200 px-2.5 py-1.5 outline-none">
-                  <option value="active">🟢 Ativo (Redirecionando 302)</option>
-                  <option value="paused">⏸️ Pausado (Retorna 410 / Fallback)</option>
-                </select>
+                <input type="hidden" id="input-status" value="active">
               </div>
             </div>
 
@@ -711,7 +690,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
                     <i class="fa-solid fa-check text-[8px]"></i> Contraste Seguro • Leitura 100%
                   </span>
                 </div>
-                <p class="text-[10px] text-zinc-500 font-mono truncate" id="preview-slug">/catalogo</p>
+                <p class="text-[10px] text-zinc-500 font-mono truncate" id="preview-slug">https://...</p>
               </div>
             </div>
 
@@ -721,10 +700,10 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 
       <!-- Modal Footer (Fixo na parte inferior) -->
       <div class="px-5 py-3 border-t border-zinc-100 flex items-center justify-between bg-zinc-50/70 shrink-0">
-        <span class="text-[10px] text-zinc-400 hidden sm:inline">Propagação no Redis em &lt; 1ms</span>
+        <span class="text-[10px] text-emerald-600 font-medium hidden sm:inline"><i class="fa-solid fa-check mr-1"></i>Vetor pronto para impressão gráfica</span>
         <div class="flex items-center space-x-2 ml-auto">
           <button type="button" onclick="fecharModal()" class="px-3 py-1.5 text-xs font-semibold text-zinc-600 hover:bg-zinc-200/60 rounded-lg transition">Cancelar</button>
-          <button type="button" onclick="document.getElementById('form-qr').requestSubmit()" id="btn-submit" class="px-4 py-1.5 text-xs font-semibold text-white bg-zinc-900 hover:bg-zinc-800 rounded-lg shadow-xs transition active:scale-95">Salvar QR Code</button>
+          <button type="button" onclick="document.getElementById('form-qr').requestSubmit()" id="btn-submit" class="px-4 py-1.5 text-xs font-semibold text-white bg-zinc-900 hover:bg-zinc-800 rounded-lg shadow-xs transition active:scale-95">Salvar QR Code Estático</button>
         </div>
       </div>
 
@@ -738,13 +717,13 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         <i class="fa-solid fa-xmark"></i>
       </button>
       <h3 id="zoom-title" class="font-bold text-sm text-zinc-900 truncate">QR Code Ampliado</h3>
-      <p id="zoom-slug" class="text-xs text-zinc-500 font-mono mt-0.5">/slug</p>
+      <p id="zoom-slug" class="text-xs text-zinc-500 font-mono mt-0.5 truncate">/slug</p>
       
       <div class="my-4 p-3 bg-zinc-50 rounded-xl border border-zinc-100 flex items-center justify-center">
         <img id="zoom-img" src="" alt="QR Code Ampliado" class="w-56 h-56 object-contain">
       </div>
 
-      <p class="text-[11px] text-zinc-400">Aponte a câmera do seu smartphone para testar o redirecionamento instantâneo.</p>
+      <p class="text-[11px] text-zinc-400">Aponte a câmera do seu smartphone para abrir o destino direto.</p>
       
       <div class="mt-4 pt-3 border-t border-zinc-100 flex items-center justify-center gap-2">
         <a id="zoom-btn-svg" href="#" class="px-3 py-1.5 text-xs font-semibold text-zinc-700 bg-zinc-100 hover:bg-zinc-200 rounded-lg transition">Baixar SVG</a>
@@ -1080,46 +1059,23 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         const allRecentScans = Array.from(mergedMap.values()).sort((a, b) => new Date(b.ts) - new Date(a.ts)).slice(0, 50);
         saveStoredScans(allRecentScans);
 
-        const totalScansCount = Math.max((scansData && scansData.total_scans) || 0, allRecentScans.length);
-
         // Atualiza KPIs
-        document.getElementById('kpi-total').innerText = totalScansCount;
-        const unicos = new Set(allRecentScans.map(e => e.visitor_hash)).size;
-        document.getElementById('kpi-unicos').innerText = unicos;
-
-        const mobiles = allRecentScans.filter(e => e.device === 'mobile').length;
-        if (totalScansCount > 0) {
-          document.getElementById('kpi-mobile').innerText = Math.round((mobiles / totalScansCount) * 100) + '%';
-        }
-
-        document.getElementById('count-all').innerText = todosQRs.length;
+        const elTotal = document.getElementById('kpi-total');
+        if (elTotal) elTotal.innerText = todosQRs.length;
+        const elCountAll = document.getElementById('count-all');
+        if (elCountAll) elCountAll.innerText = todosQRs.length;
 
         filtrarQRs();
-        renderizarTabelaScans(allRecentScans);
       } catch (err) {
         console.error("Erro ao carregar dados:", err);
       }
     }
 
-    function definirFiltroStatus(status) {
-      filtroAtualStatus = status;
-      ['all', 'active', 'paused'].forEach(s => {
-        const btn = document.getElementById('btn-filtro-' + s);
-        if (s === status) {
-          btn.className = 'font-semibold px-2.5 py-1 rounded-md bg-white text-zinc-900 shadow-2xs transition';
-        } else {
-          btn.className = 'font-medium px-2.5 py-1 rounded-md text-zinc-600 hover:text-zinc-900 transition';
-        }
-      });
-      filtrarQRs();
-    }
-
     function filtrarQRs() {
       const busca = (document.getElementById('filtro-busca').value || '').toLowerCase().trim();
       const filtrados = todosQRs.filter(qr => {
-        const bateStatus = (filtroAtualStatus === 'all') || (qr.status === filtroAtualStatus);
-        const bateBusca = !busca || qr.name.toLowerCase().includes(busca) || qr.slug.toLowerCase().includes(busca) || qr.default_url.toLowerCase().includes(busca);
-        return bateStatus && bateBusca;
+        const bateBusca = !busca || qr.name.toLowerCase().includes(busca) || qr.slug.toLowerCase().includes(busca) || (qr.default_url || '').toLowerCase().includes(busca);
+        return bateBusca;
       });
 
       if (modoVisualizacao === 'grid') {
@@ -1129,7 +1085,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       }
     }
 
-    // Modo Grid: Cards compactos e balanceados (~160px de altura)
+    // Modo Grid: Cards compactos e balanceados
     function renderizarQRCards(qrs) {
       const container = document.getElementById('qr-grid');
       if (qrs.length === 0) {
@@ -1148,19 +1104,11 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       const activeHost = getActiveHost();
 
       container.innerHTML = qrs.map(qr => {
-        const statusBadge = qr.status === 'active'
-          ? '<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200"><span class="w-1 h-1 rounded-full bg-emerald-500"></span>Ativo</span>'
-          : '<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-zinc-100 text-zinc-600 border border-zinc-200"><span class="w-1 h-1 rounded-full bg-zinc-400"></span>Pausado</span>';
-
-        const clicks = Number(qr.clicks || 0);
-        const clicksBadge = `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200/80" title="${clicks} acessos registrados"><i class="fa-solid fa-arrow-pointer text-[8px]"></i>${clicks} ${clicks === 1 ? 'scan' : 'scans'}</span>`;
-
         const safeSlug = escapeHtml(qr.slug);
         const safeName = escapeHtml(qr.name);
         const jsSlug = escapeJs(qr.slug);
         const jsName = escapeJs(qr.name);
         const safeUrl = sanitizeUrl(qr.default_url);
-        const safeShortUrl = sanitizeUrl(qr.short_url);
         const displayUrl = escapeHtml((qr.default_url || '').replace(/^https?:\/\//, ''));
         const d = qr.design || {};
         const fgParam = encodeURIComponent(d.foreground || '#0F172A');
@@ -1171,20 +1119,19 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         const styleParam = encodeURIComponent(d.module_style || 'rounded');
         const vParam = `${qr.v || 1}_${(d.foreground || '').replace('#', '')}_${(d.background || '').replace('#', '')}`;
         const qrImgUrl = `/preview/${encodeURIComponent(qr.slug)}.svg?host_override=${encodeURIComponent(activeHost)}&v=${encodeURIComponent(vParam)}&color=${fgParam}&bg_color=${bgParam}&bg_type=${bgTypeParam}&bg_color_end=${bgEndParam}&frame=${frameParam}&style=${styleParam}`;
-        const liveFallbackUrl = `/api/preview-live?slug=${encodeURIComponent(qr.slug)}&color=${fgParam}&bg_color=${bgParam}&bg_type=${bgTypeParam}&bg_color_end=${bgEndParam}&frame=${frameParam}&style=${styleParam}&host=${encodeURIComponent(activeHost)}`;
+        const liveFallbackUrl = `/api/preview-live?slug=${encodeURIComponent(qr.slug)}&url=${encodeURIComponent(qr.default_url || '')}&color=${fgParam}&bg_color=${bgParam}&bg_type=${bgTypeParam}&bg_color_end=${bgEndParam}&frame=${frameParam}&style=${styleParam}&host=${encodeURIComponent(activeHost)}`;
         const jsLiveFallbackUrl = escapeJs(liveFallbackUrl);
         const jsQrImgUrl = escapeJs(qrImgUrl);
 
         return `
           <div class="bg-white rounded-xl border border-zinc-200/80 shadow-2xs hover:border-zinc-300 hover:shadow-xs transition p-3.5 flex flex-col justify-between">
             <div>
-              <!-- Top: Nome, Cliques e Status -->
+              <!-- Top: Nome e Selo Permanente -->
               <div class="flex items-center justify-between gap-2 mb-2">
                 <h4 class="font-bold text-zinc-900 text-xs truncate" title="${safeName}">${safeName}</h4>
-                <div class="flex items-center gap-1.5 shrink-0">
-                  ${clicksBadge}
-                  ${statusBadge}
-                </div>
+                <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
+                  <i class="fa-solid fa-infinity text-[8px] text-emerald-600"></i> Permanente
+                </span>
               </div>
 
               <!-- Meio: QR Code Thumbnail + Links -->
@@ -1192,40 +1139,38 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
                 <div class="w-18 h-18 sm:w-20 sm:h-20 shrink-0 bg-white p-1 rounded-lg border border-zinc-200/80 flex items-center justify-center cursor-pointer hover:border-zinc-400 transition" onclick="abrirModalZoom('${jsSlug}', '${jsName}', '${jsQrImgUrl}')" title="Clique para ampliar o QR Code">
                   <img src="${qrImgUrl}" alt="QR ${safeSlug}" class="w-full h-full object-contain" onerror="this.onerror=null; this.src='${jsLiveFallbackUrl}';">
                 </div>
-                <div class="min-w-0 flex-1 space-y-1">
+                <div class="min-w-0 flex-1 space-y-1.5">
                   <div>
-                    <span class="text-[9px] font-bold text-zinc-400 uppercase tracking-wider block">Link Curto</span>
-                    <div class="flex items-center gap-1">
-                      <span class="font-mono text-xs font-semibold text-zinc-800 truncate">/${safeSlug}</span>
-                      <button onclick="copiarLink('${escapeJs(qr.short_url)}')" class="text-zinc-400 hover:text-zinc-700 text-[11px] p-0.5" title="Copiar link">
-                        <i class="fa-regular fa-copy"></i>
-                      </button>
-                    </div>
-                  </div>
-                  <div>
-                    <span class="text-[9px] font-bold text-zinc-400 uppercase tracking-wider block">Destino</span>
-                    <a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="text-[11px] text-blue-600 hover:text-blue-800 font-medium truncate block" title="${safeUrl}">
-                      ${displayUrl}
+                    <span class="text-[9px] font-bold text-zinc-400 uppercase tracking-wider block">Destino Gravado</span>
+                    <a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="text-xs text-blue-600 hover:text-blue-800 font-semibold truncate block" title="${safeUrl}">
+                      <i class="fa-solid fa-arrow-up-right-from-square text-[9px] mr-1"></i>${displayUrl}
                     </a>
+                  </div>
+                  <div class="flex items-center gap-1">
+                    <span class="text-[10px] text-zinc-400 font-mono bg-white px-1.5 py-0.5 rounded border border-zinc-200">/${safeSlug}</span>
+                    <button onclick="copiarLink('${escapeJs(qr.default_url)}')" class="text-zinc-400 hover:text-zinc-700 text-[11px] p-0.5" title="Copiar link de destino">
+                      <i class="fa-regular fa-copy"></i>
+                    </button>
                   </div>
                 </div>
               </div>
             </div>
 
-            <!-- Rodapé: Ações Compactas -->
+            <!-- Rodapé: Ações e Downloads -->
             <div class="mt-2.5 pt-2 border-t border-zinc-100 flex items-center justify-between text-xs">
               <div class="flex items-center space-x-1">
                 <button onclick="abrirModalEditar('${jsSlug}')" class="px-2 py-1 rounded-md text-zinc-700 hover:bg-zinc-100 font-medium text-[11px] flex items-center gap-1 transition">
-                  <i class="fa-solid fa-pen-to-square text-[10px]"></i>Editar
+                  <i class="fa-solid fa-palette text-[10px] text-indigo-600"></i>Design
                 </button>
-                <a href="${safeShortUrl}" target="_blank" rel="noopener noreferrer" class="px-2 py-1 rounded-md text-zinc-700 hover:bg-zinc-100 font-medium text-[11px] flex items-center gap-1 transition">
-                  <i class="fa-solid fa-arrow-turn-down text-[10px]"></i>Testar
+                <a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="px-2 py-1 rounded-md text-zinc-700 hover:bg-zinc-100 font-medium text-[11px] flex items-center gap-1 transition" title="Abrir link no navegador">
+                  <i class="fa-solid fa-arrow-turn-down text-[10px]"></i>Abrir
                 </a>
               </div>
 
               <div class="flex items-center space-x-1">
-                <a href="/export/${encodeURIComponent(qr.slug)}?format=svg&host_override=${encodeURIComponent(activeHost)}" class="px-1.5 py-0.5 rounded text-[10px] font-semibold text-zinc-600 hover:bg-zinc-100 transition">SVG</a>
-                <a href="/export/${encodeURIComponent(qr.slug)}?format=png&size=1024&host_override=${encodeURIComponent(activeHost)}" class="px-1.5 py-0.5 rounded text-[10px] font-semibold text-zinc-600 hover:bg-zinc-100 transition">PNG</a>
+                <a href="/export/${encodeURIComponent(qr.slug)}?format=svg&host_override=${encodeURIComponent(activeHost)}" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-zinc-100 text-zinc-700 hover:bg-zinc-200 transition" title="Baixar Vetor SVG (Gráfica)">SVG</a>
+                <a href="/export/${encodeURIComponent(qr.slug)}?format=png&size=2048&host_override=${encodeURIComponent(activeHost)}" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-zinc-100 text-zinc-700 hover:bg-zinc-200 transition" title="Baixar PNG em Alta Resolução">PNG</a>
+                <a href="/export/${encodeURIComponent(qr.slug)}?format=pdf&host_override=${encodeURIComponent(activeHost)}" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-zinc-100 text-zinc-700 hover:bg-zinc-200 transition" title="Baixar PDF Vetorial">PDF</a>
                 <button onclick="deletarQRCode('${jsSlug}', '${jsName}')" class="p-1 rounded text-rose-500 hover:bg-rose-50 transition" title="Excluir">
                   <i class="fa-regular fa-trash-can text-xs"></i>
                 </button>
@@ -1247,19 +1192,11 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       const activeHost = getActiveHost();
 
       container.innerHTML = qrs.map(qr => {
-        const statusBadge = qr.status === 'active'
-          ? '<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">Ativo</span>'
-          : '<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-zinc-100 text-zinc-600 border border-zinc-200">Pausado</span>';
-
-        const clicks = Number(qr.clicks || 0);
-        const clicksBadge = `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200/80" title="${clicks} acessos registrados"><i class="fa-solid fa-arrow-pointer text-[8px]"></i>${clicks} ${clicks === 1 ? 'scan' : 'scans'}</span>`;
-
         const safeSlug = escapeHtml(qr.slug);
         const safeName = escapeHtml(qr.name);
         const jsSlug = escapeJs(qr.slug);
         const jsName = escapeJs(qr.name);
         const safeUrl = sanitizeUrl(qr.default_url);
-        const safeShortUrl = sanitizeUrl(qr.short_url);
 
         const d = qr.design || {};
         const fgParam = encodeURIComponent(d.foreground || '#0F172A');
@@ -1270,7 +1207,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         const styleParam = encodeURIComponent(d.module_style || 'rounded');
         const vParam = `${qr.v || 1}_${(d.foreground || '').replace('#', '')}_${(d.background || '').replace('#', '')}`;
         const qrImgUrl = `/preview/${encodeURIComponent(qr.slug)}.svg?host_override=${encodeURIComponent(activeHost)}&v=${encodeURIComponent(vParam)}&color=${fgParam}&bg_color=${bgParam}&bg_type=${bgTypeParam}&bg_color_end=${bgEndParam}&frame=${frameParam}&style=${styleParam}`;
-        const liveFallbackUrl = `/api/preview-live?slug=${encodeURIComponent(qr.slug)}&color=${fgParam}&bg_color=${bgParam}&bg_type=${bgTypeParam}&bg_color_end=${bgEndParam}&frame=${frameParam}&style=${styleParam}&host=${encodeURIComponent(activeHost)}`;
+        const liveFallbackUrl = `/api/preview-live?slug=${encodeURIComponent(qr.slug)}&url=${encodeURIComponent(qr.default_url || '')}&color=${fgParam}&bg_color=${bgParam}&bg_type=${bgTypeParam}&bg_color_end=${bgEndParam}&frame=${frameParam}&style=${styleParam}&host=${encodeURIComponent(activeHost)}`;
         const jsLiveFallbackUrl = escapeJs(liveFallbackUrl);
         const jsQrImgUrl = escapeJs(qrImgUrl);
 
@@ -1283,8 +1220,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
               <div class="min-w-0">
                 <div class="flex items-center gap-2">
                   <h4 class="font-bold text-xs text-zinc-900 truncate" title="${safeName}">${safeName}</h4>
-                  ${clicksBadge}
-                  ${statusBadge}
+                  <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">Permanente</span>
                 </div>
                 <div class="flex items-center gap-2 text-[11px] text-zinc-500 mt-0.5">
                   <span class="font-mono text-zinc-800 font-semibold">/${safeSlug}</span>
@@ -1295,11 +1231,12 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
             </div>
 
             <div class="flex items-center space-x-2 shrink-0 text-xs">
-              <button onclick="copiarLink('${escapeJs(qr.short_url)}')" class="px-2 py-1 rounded bg-zinc-100 hover:bg-zinc-200 text-zinc-700 text-[11px] font-medium" title="Copiar link">Copiar</button>
-              <a href="${safeShortUrl}" target="_blank" rel="noopener noreferrer" class="px-2 py-1 rounded bg-zinc-100 hover:bg-zinc-200 text-zinc-700 text-[11px] font-medium">Testar</a>
-              <button onclick="abrirModalEditar('${jsSlug}')" class="px-2 py-1 rounded bg-zinc-100 hover:bg-zinc-200 text-zinc-700 text-[11px] font-medium">Editar</button>
-              <a href="/export/${encodeURIComponent(qr.slug)}?format=svg&host_override=${encodeURIComponent(activeHost)}" class="text-[10px] font-bold text-zinc-600 hover:text-zinc-900 p-1">SVG</a>
-              <a href="/export/${encodeURIComponent(qr.slug)}?format=png&size=1024&host_override=${encodeURIComponent(activeHost)}" class="text-[10px] font-bold text-zinc-600 hover:text-zinc-900 p-1">PNG</a>
+              <button onclick="copiarLink('${escapeJs(qr.default_url)}')" class="px-2 py-1 rounded bg-zinc-100 hover:bg-zinc-200 text-zinc-700 text-[11px] font-medium" title="Copiar link">Copiar</button>
+              <a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="px-2 py-1 rounded bg-zinc-100 hover:bg-zinc-200 text-zinc-700 text-[11px] font-medium">Abrir</a>
+              <button onclick="abrirModalEditar('${jsSlug}')" class="px-2 py-1 rounded bg-zinc-100 hover:bg-zinc-200 text-zinc-700 text-[11px] font-medium">Design</button>
+              <a href="/export/${encodeURIComponent(qr.slug)}?format=svg&host_override=${encodeURIComponent(activeHost)}" class="text-[10px] font-bold bg-zinc-100 hover:bg-zinc-200 rounded text-zinc-700 p-1 px-1.5">SVG</a>
+              <a href="/export/${encodeURIComponent(qr.slug)}?format=png&size=2048&host_override=${encodeURIComponent(activeHost)}" class="text-[10px] font-bold bg-zinc-100 hover:bg-zinc-200 rounded text-zinc-700 p-1 px-1.5">PNG</a>
+              <a href="/export/${encodeURIComponent(qr.slug)}?format=pdf&host_override=${encodeURIComponent(activeHost)}" class="text-[10px] font-bold bg-zinc-100 hover:bg-zinc-200 rounded text-zinc-700 p-1 px-1.5">PDF</a>
               <button onclick="deletarQRCode('${jsSlug}', '${jsName}')" class="p-1 text-rose-500 hover:bg-rose-50 rounded" title="Excluir"><i class="fa-regular fa-trash-can"></i></button>
             </div>
           </div>
@@ -1345,8 +1282,8 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 
     // Modal Control: Create & Edit
     function abrirModalCriar() {
-      document.getElementById('modal-titulo').innerText = "Novo QR Code Dinâmico";
-      document.getElementById('btn-submit').innerText = "Criar QR Code";
+      document.getElementById('modal-titulo').innerText = "Novo QR Code Estático";
+      document.getElementById('btn-submit').innerText = "Gerar QR Code Estático";
       document.getElementById('qr-modo').value = "criar";
       document.getElementById('qr-slug-original').value = "";
       document.getElementById('campo-status').classList.add('hidden');
@@ -1367,15 +1304,15 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       const qr = todosQRs.find(q => q.slug === slug);
       if (!qr) return;
 
-      document.getElementById('modal-titulo').innerText = `Editar QR Code /${slug}`;
+      document.getElementById('modal-titulo').innerText = `Editar Design do QR Code`;
       document.getElementById('btn-submit').innerText = "Salvar Alterações";
       document.getElementById('qr-modo').value = "editar";
       document.getElementById('qr-slug-original').value = slug;
-      document.getElementById('campo-status').classList.remove('hidden');
+      document.getElementById('campo-status').classList.add('hidden');
 
       document.getElementById('input-nome').value = qr.name;
       document.getElementById('input-slug').value = qr.slug;
-      document.getElementById('input-slug').disabled = true; // Slug fixo para manter consistência impressa
+      document.getElementById('input-slug').disabled = true; // Slug fixo para manter consistência interna
       document.getElementById('input-url').value = qr.default_url;
       const d = qr.design || {};
       document.getElementById('input-frame').value = d.frame_text || "ESCANEIE AQUI";
@@ -1411,7 +1348,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       };
       zoomImg.src = imgUrl;
       document.getElementById('zoom-btn-svg').href = `/export/${slug}?format=svg&host_override=${encodeURIComponent(activeHost)}`;
-      document.getElementById('zoom-btn-png').href = `/export/${slug}?format=png&size=1024&host_override=${encodeURIComponent(activeHost)}`;
+      document.getElementById('zoom-btn-png').href = `/export/${slug}?format=png&size=2048&host_override=${encodeURIComponent(activeHost)}`;
       document.getElementById('modal-zoom').classList.remove('hidden');
     }
 
@@ -1443,9 +1380,11 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         const nome = document.getElementById('input-nome').value || "Meu QR Code";
         const rawSlug = document.getElementById('input-slug').value || "link";
         const slug = rawSlug.toLowerCase().replace(/[^a-z0-9_-]/g, '') || "link";
+        const rawUrl = (document.getElementById('input-url').value || '').trim();
+        const urlDestino = rawUrl || "https://instagram.com/empresa";
         
         document.getElementById('preview-nome').innerText = nome;
-        document.getElementById('preview-slug').innerText = `/${slug}`;
+        document.getElementById('preview-slug').innerText = urlDestino.replace(/^https?:\/\//, '');
 
         const cor = document.getElementById('input-cor').value;
         const frame = document.getElementById('input-frame').value;
@@ -1481,7 +1420,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         }
 
         try {
-          const res = await fetch(`/api/preview-live?slug=${encodeURIComponent(slug)}&color=${encodeURIComponent(cor)}&frame=${encodeURIComponent(frame)}&style=${encodeURIComponent(estilo)}&host=${encodeURIComponent(activeHost)}&bg_type=${encodeURIComponent(modoBg)}&bg_color=${encodeURIComponent(bgCor)}&bg_color_end=${encodeURIComponent(bgCorEnd)}`);
+          const res = await fetch(`/api/preview-live?slug=${encodeURIComponent(slug)}&url=${encodeURIComponent(urlDestino)}&color=${encodeURIComponent(cor)}&frame=${encodeURIComponent(frame)}&style=${encodeURIComponent(estilo)}&host=${encodeURIComponent(activeHost)}&bg_type=${encodeURIComponent(modoBg)}&bg_color=${encodeURIComponent(bgCor)}&bg_color_end=${encodeURIComponent(bgCorEnd)}`);
           if (res.ok) {
             const svg = await res.text();
             document.getElementById('preview-svg-box').innerHTML = svg;
@@ -1996,6 +1935,7 @@ def apply_svg_gradient(svg_bytes: bytes, bg_start: str, bg_end: str, gradient_id
 @app.get("/api/preview-live")
 def live_preview(
     slug: str = "preview",
+    url: Optional[str] = None,
     color: str = "#0F172A",
     bg_color: str = "#FFFFFF",
     bg_color_end: Optional[str] = None,
@@ -2017,7 +1957,8 @@ def live_preview(
         finder_style="rounded" if style == "rounded" else "square",
         frame_text=frame,
     )
-    svg_bytes = render(f"http://{host}/{slug}", design=design, fmt="svg", size_px=320)
+    target_data = url.strip() if url and url.strip() else f"http://{host}/{slug}"
+    svg_bytes = render(target_data, design=design, fmt="svg", size_px=320)
     if bg_type == "gradient" and bg_color_end:
         svg_bytes = apply_svg_gradient(svg_bytes, bg_color, bg_color_end)
     return Response(content=svg_bytes, media_type="image/svg+xml")
@@ -2080,12 +2021,13 @@ async def preview_svg(
         frame_text=f_text,
     )
 
+    target_data = (payload.get("default_url") if payload else "").strip() or f"http://{active_host}/{clean_slug}"
     try:
-        svg_bytes = render(f"http://{active_host}/{clean_slug}", design=design, fmt="svg", size_px=400)
+        svg_bytes = render(target_data, design=design, fmt="svg", size_px=400)
     except Exception:
         design.foreground = "#0F172A"
         design.background = "#FFFFFF"
-        svg_bytes = render(f"http://{active_host}/{clean_slug}", design=design, fmt="svg", size_px=400)
+        svg_bytes = render(target_data, design=design, fmt="svg", size_px=400)
 
     if bg_t == "gradient" and bg_end:
         svg_bytes = apply_svg_gradient(svg_bytes, bg_col, bg_end)
@@ -2174,12 +2116,13 @@ async def export_qr(
         finder_style=f_style,
         frame_text=f_text,
     )
+    target_data = (payload.get("default_url") if payload else "").strip() or f"http://{active_host}/{clean_slug}"
     try:
-        content = render(f"http://{active_host}/{clean_slug}", design=design, fmt=format, size_px=size)
+        content = render(target_data, design=design, fmt=format, size_px=size)
     except InvalidDesign:
         design.foreground = "#0F172A"
         design.background = "#FFFFFF"
-        content = render(f"http://{active_host}/{clean_slug}", design=design, fmt=format, size_px=size)
+        content = render(target_data, design=design, fmt=format, size_px=size)
     except Exception as exc:
         log.error("Erro ao exportar QR code /%s (%s): %r", clean_slug, format, exc)
         raise HTTPException(status_code=500, detail="Erro interno ao gerar arquivo de exportação")
