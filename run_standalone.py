@@ -764,15 +764,10 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     let todosQRs = [];
     let filtroAtualStatus = 'all';
 
-    // Auto-higienização para restaurar os códigos de demonstração caso o navegador os tenha bloqueado
-    if (!localStorage.getItem('demo_qrs_restored_v3')) {
-      try {
-        const list = JSON.parse(localStorage.getItem('deleted_qr_slugs') || '[]');
-        const cleaned = list.filter(s => !['promo', 'blackfriday', 'insta'].includes(s));
-        localStorage.setItem('deleted_qr_slugs', JSON.stringify(cleaned));
-        localStorage.setItem('demo_qrs_restored_v3', 'true');
-      } catch (e) {}
-    }
+    // Limpeza de tombstones locais obsoletos: confiamos no banco central Redis
+    try {
+      localStorage.removeItem('deleted_qr_slugs');
+    } catch (e) {}
 
     function getDeletedSlugs() {
       try {
@@ -1033,20 +1028,17 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         }
         saveStoredClicks(mergedClicks);
 
-        const deletedSlugs = getDeletedSlugs();
         const customQRs = Object.values(getCustomQRs());
         const qrsMap = new Map();
 
         (Array.isArray(serverQRs) ? serverQRs : []).forEach(q => {
           const k = String(q.slug).toLowerCase().trim();
-          if (!deletedSlugs.includes(k)) {
-            qrsMap.set(k, q);
-          }
+          qrsMap.set(k, q);
         });
 
         customQRs.forEach(q => {
           const k = String(q.slug).toLowerCase().trim();
-          if (!deletedSlugs.includes(k) && !qrsMap.has(k)) {
+          if (!qrsMap.has(k)) {
             qrsMap.set(k, q);
             // Re-sincroniza silenciosamente com o backend se a instância tiver reiniciado
             fetch('/api/qrcodes', {
@@ -1168,6 +1160,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         const jsName = escapeJs(qr.name);
         const safeUrl = sanitizeUrl(qr.default_url);
         const safeShortUrl = sanitizeUrl(qr.short_url);
+        const displayUrl = escapeHtml((qr.default_url || '').replace(/^https?:\/\//, ''));
         const d = qr.design || {};
         const fgParam = encodeURIComponent(d.foreground || '#0F172A');
         const bgParam = encodeURIComponent(d.background || '#FFFFFF');
