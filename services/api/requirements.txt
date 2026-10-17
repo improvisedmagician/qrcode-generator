@@ -8,5 +8,4 @@ pyjwt==2.10.1
 segno==1.6.1
 pillow==11.1.0
 reportlab==4.2.5
-zxing-cpp==2.3.0
 pydantic==2.10.4

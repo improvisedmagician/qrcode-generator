@@ -57,6 +57,9 @@ LAN_IP = detect_lan_ip()
 
 IS_SERVERLESS = bool(os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME"))
 REDIS_URL = os.getenv("REDIS_URL")
+API_URL = os.getenv("API_URL")
+if API_URL:
+    log.info("Binding Vercel ativo para 'api': %s", API_URL)
 
 if REDIS_URL:
     try:

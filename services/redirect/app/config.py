@@ -13,7 +13,7 @@ class Settings:
         "PG_REPLICA_DSN", "postgresql://app:app@localhost:5432/qr"))
     stream: str = field(default_factory=lambda: os.getenv("SCAN_STREAM", "scans"))
     stream_maxlen: int = field(default_factory=lambda: int(os.getenv("SCAN_STREAM_MAXLEN", "5000000")))
-    spool_dir: Path = field(default_factory=lambda: Path(os.getenv("SPOOL_DIR", "./spool")))
+    spool_dir: Path = field(default_factory=lambda: Path(os.getenv("SPOOL_DIR", "/tmp/spool" if os.getenv("VERCEL") else "./spool")))
     trusted_ip_header: str = field(default_factory=lambda: os.getenv(
         "TRUSTED_IP_HEADER", "cf-connecting-ip").lower())
     country_header: str = field(default_factory=lambda: os.getenv(

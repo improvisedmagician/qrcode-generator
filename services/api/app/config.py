@@ -32,6 +32,7 @@ class Settings:
     seed_demo: bool = field(default_factory=lambda: _env("SEED_DEMO", "0") == "1")
     custom_domain_cname_target: str = field(default_factory=lambda: _env(
         "CUSTOM_DOMAIN_TARGET", "custom.meudominio.com"))
+    redirect_service_url: str = field(default_factory=lambda: _env("REDIRECT_URL", ""))
 
 
 settings = Settings()

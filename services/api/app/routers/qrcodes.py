@@ -27,6 +27,9 @@ def generate_slug(length: int = 7) -> str:
 
 
 def format_short_url(hostname: str, slug: str) -> str:
+    if settings.redirect_service_url:
+        base = settings.redirect_service_url.rstrip("/")
+        return f"{base}/{slug}"
     port = settings.short_url_port if settings.short_url_port and hostname == "localhost" else ""
     return f"{settings.short_url_scheme}://{hostname}{port}/{slug}"
 
