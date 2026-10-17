@@ -56,6 +56,13 @@ LAN_IP = detect_lan_ip()
 
 IS_SERVERLESS = bool(os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME"))
 REDIS_URL = os.getenv("REDIS_URL")
+if not REDIS_URL:
+    upstash_rest_url = os.getenv("UPSTASH_REDIS_REST_URL")
+    upstash_rest_token = os.getenv("UPSTASH_REDIS_REST_TOKEN")
+    if upstash_rest_url and upstash_rest_token:
+        host = urlsplit(upstash_rest_url).netloc or upstash_rest_url.replace("https://", "").replace("http://", "").split("/")[0]
+        REDIS_URL = f"rediss://default:{upstash_rest_token}@{host}:6379"
+
 API_URL = os.getenv("API_URL")
 if API_URL:
     log.info("Binding Vercel ativo para 'api': %s", API_URL)
