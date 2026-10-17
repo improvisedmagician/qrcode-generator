@@ -979,6 +979,12 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       atualizarPreviewLive();
     }
 
+    function saveStoredScans(scans) {
+      try {
+        localStorage.setItem('cached_scans', JSON.stringify(scans || []));
+      } catch (e) {}
+    }
+
     function getStoredScans() {
       try {
         return JSON.parse(localStorage.getItem('cached_scans') || '[]');
@@ -1958,6 +1964,7 @@ def apply_svg_gradient(svg_bytes: bytes, bg_start: str, bg_end: str, gradient_id
             f'fill="url(#{gradient_id})"',
             svg_str,
             count=1,
+            flags=re.IGNORECASE,
         )
         return svg_str.encode("utf-8")
     except Exception:
