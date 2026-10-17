@@ -290,7 +290,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       <!-- Botões de Ação -->
       <div class="flex items-center space-x-2 shrink-0">
         <div class="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/60">
-          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block shadow-[0_0_6px_rgba(16,185,129,0.8)]"></span>
           Cluster &lt; 5ms
         </div>
         <button onclick="limparTudo()" class="inline-flex items-center gap-1.5 bg-zinc-100 hover:bg-rose-50 text-zinc-600 hover:text-rose-600 border border-zinc-200 text-xs font-medium px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl transition active:scale-95" title="Limpar todos os QR Codes e dados">
@@ -388,7 +388,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     <section class="bg-white rounded-xl border border-zinc-200/80 shadow-2xs overflow-hidden">
       <div class="px-4 py-2.5 border-b border-zinc-100 flex items-center justify-between bg-zinc-50/60">
         <div class="flex items-center space-x-2">
-          <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+          <span class="w-2 h-2 rounded-full bg-emerald-500 inline-block shadow-[0_0_8px_rgba(16,185,129,0.7)]"></span>
           <h3 class="text-xs font-bold text-zinc-900 uppercase tracking-wider">Telemetria de Scans em Tempo Real</h3>
         </div>
         <span class="text-[10px] text-zinc-400 font-mono">Worker Redis Streams • LGPD Hash</span>
@@ -700,6 +700,20 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       atualizarPreviewLive();
     }
 
+    function getStoredScans() {
+      try {
+        return JSON.parse(localStorage.getItem('cached_scans') || '[]');
+      } catch {
+        return [];
+      }
+    }
+
+    function saveStoredScans(scans) {
+      try {
+        localStorage.setItem('cached_scans', JSON.stringify(scans.slice(0, 50)));
+      } catch {}
+    }
+
     async function carregarDashboard() {
       try {
         const activeHost = getActiveHost();
@@ -744,20 +758,35 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 
         todosQRs = Array.from(qrsMap.values());
 
+        // Mescla scans do servidor com o cache do localStorage para estabilidade serverless
+        const existingScans = getStoredScans();
+        const serverScans = (scansData && Array.isArray(scansData.recent_events)) ? scansData.recent_events : [];
+        const mergedMap = new Map();
+        [...serverScans, ...existingScans].forEach(e => {
+          const key = `${e.ts}_${e.slug}_${e.visitor_hash || ''}`;
+          if (!mergedMap.has(key)) {
+            mergedMap.set(key, e);
+          }
+        });
+        const allRecentScans = Array.from(mergedMap.values()).sort((a, b) => new Date(b.ts) - new Date(a.ts)).slice(0, 50);
+        saveStoredScans(allRecentScans);
+
+        const totalScansCount = Math.max((scansData && scansData.total_scans) || 0, allRecentScans.length);
+
         // Atualiza KPIs
-        document.getElementById('kpi-total').innerText = scansData.total_scans;
-        const unicos = new Set(scansData.recent_events.map(e => e.visitor_hash)).size;
+        document.getElementById('kpi-total').innerText = totalScansCount;
+        const unicos = new Set(allRecentScans.map(e => e.visitor_hash)).size;
         document.getElementById('kpi-unicos').innerText = unicos;
 
-        const mobiles = scansData.recent_events.filter(e => e.device === 'mobile').length;
-        if (scansData.total_scans > 0) {
-          document.getElementById('kpi-mobile').innerText = Math.round((mobiles / scansData.total_scans) * 100) + '%';
+        const mobiles = allRecentScans.filter(e => e.device === 'mobile').length;
+        if (totalScansCount > 0) {
+          document.getElementById('kpi-mobile').innerText = Math.round((mobiles / totalScansCount) * 100) + '%';
         }
 
         document.getElementById('count-all').innerText = todosQRs.length;
 
         filtrarQRs();
-        renderizarTabelaScans(scansData.recent_events);
+        renderizarTabelaScans(allRecentScans);
       } catch (err) {
         console.error("Erro ao carregar dados:", err);
       }
@@ -938,8 +967,15 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       }).join('');
     }
 
+    let lastRenderedScansJson = '';
     function renderizarTabelaScans(events) {
       const tbody = document.getElementById('scans-tbody');
+      const currentJson = JSON.stringify(events || []);
+      if (currentJson === lastRenderedScansJson) {
+        return; // Dados inalterados, evita repintar e piscar a tabela
+      }
+      lastRenderedScansJson = currentJson;
+
       if (!events || events.length === 0) {
         tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-6 text-center text-zinc-400 font-sans text-xs">Nenhum scan registrado ainda. Aponte a câmera do celular para qualquer código!</td></tr>';
         return;
@@ -1187,6 +1223,8 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       try {
         localStorage.removeItem('custom_qrcodes');
         localStorage.removeItem('deleted_qr_slugs');
+        localStorage.removeItem('cached_scans');
+        lastRenderedScansJson = '';
         const defaultSlugs = ['promo', 'blackfriday', 'insta', 'jogos205'];
         const currentSlugs = todosQRs.map(q => q.slug);
         const allSlugs = Array.from(new Set([...defaultSlugs, ...currentSlugs]));
