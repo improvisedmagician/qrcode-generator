@@ -7,6 +7,70 @@ from run_standalone import app, IN_MEMORY_DB
 
 @pytest.fixture
 def client():
+    from run_standalone import DELETED_SLUGS
+    DELETED_SLUGS.discard("promo")
+    DELETED_SLUGS.discard("blackfriday")
+    DELETED_SLUGS.discard("insta")
+    IN_MEMORY_DB["promo"] = {
+        "v": 1,
+        "name": "Banner Institucional São Paulo",
+        "qr_id": "11111111-1111-1111-1111-111111111111",
+        "workspace_id": "00000000-0000-0000-0000-000000000003",
+        "status": "active",
+        "default_url": "https://minhaloja.com.br/produtos",
+        "fallback_url": "https://minhaloja.com.br/encerrado",
+        "expires_at": None,
+        "utm": {"utm_source": "qrcode", "utm_medium": "banner-sp"},
+        "design": {
+            "foreground": "#0F172A",
+            "background": "#FFFFFF",
+            "module_style": "rounded",
+            "finder_style": "rounded",
+            "frame_text": "ESCANEIE AQUI",
+        },
+        "rules": [],
+        "created_at": "2026-10-16T18:00:00Z",
+    }
+    IN_MEMORY_DB["blackfriday"] = {
+        "v": 2,
+        "name": "Campanha Black Friday 2026",
+        "qr_id": "22222222-2222-2222-2222-222222222222",
+        "workspace_id": "00000000-0000-0000-0000-000000000003",
+        "status": "active",
+        "default_url": "https://minhaloja.com.br/loja-normal",
+        "fallback_url": "https://minhaloja.com.br/encerrado",
+        "expires_at": None,
+        "utm": {"utm_source": "qrcode", "utm_campaign": "bf2026"},
+        "design": {
+            "foreground": "#991B1B",
+            "background": "#FFFFFF",
+            "module_style": "square",
+            "finder_style": "square",
+            "frame_text": "BLACK FRIDAY 50% OFF",
+        },
+        "rules": [],
+        "created_at": "2026-10-16T18:15:00Z",
+    }
+    IN_MEMORY_DB["insta"] = {
+        "v": 3,
+        "name": "Cartão de Visitas — Instagram Direto",
+        "qr_id": "33333333-3333-3333-3333-333333333333",
+        "workspace_id": "00000000-0000-0000-0000-000000000003",
+        "status": "active",
+        "default_url": "https://instagram.com/empresa",
+        "fallback_url": None,
+        "expires_at": None,
+        "utm": None,
+        "design": {
+            "foreground": "#4C1D95",
+            "background": "#FFFFFF",
+            "module_style": "dots",
+            "finder_style": "dots",
+            "frame_text": "SIGA NO INSTAGRAM",
+        },
+        "rules": [],
+        "created_at": "2026-10-16T18:30:00Z",
+    }
     with TestClient(app) as c:
         yield c
 

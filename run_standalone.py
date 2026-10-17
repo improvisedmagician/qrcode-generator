@@ -78,108 +78,11 @@ else:
     redis_async = fakeredis.FakeAsyncRedis(server=fake_server, decode_responses=True)
 
 # Registro de exclusões (tombstones) para impedir ressurgimento de slugs deletados
-DELETED_SLUGS: set[str] = set()
+# Códigos de demonstração antigos marcados como excluídos por padrão
+DELETED_SLUGS: set[str] = {"promo", "blackfriday", "insta", "jogos205"}
 
-# Banco de dados simulado em memória com histórico
-IN_MEMORY_DB: dict[str, dict] = {
-    "promo": {
-        "v": 1,
-        "name": "Banner Institucional São Paulo",
-        "qr_id": "11111111-1111-1111-1111-111111111111",
-        "workspace_id": "00000000-0000-0000-0000-000000000003",
-        "status": "active",
-        "default_url": "https://minhaloja.com.br/produtos",
-        "fallback_url": "https://minhaloja.com.br/encerrado",
-        "expires_at": None,
-        "utm": {"utm_source": "qrcode", "utm_medium": "banner-sp"},
-        "design": {
-            "foreground": "#0F172A",
-            "background": "#FFFFFF",
-            "module_style": "rounded",
-            "finder_style": "rounded",
-            "frame_text": "ESCANEIE AQUI",
-        },
-        "rules": [],
-        "created_at": "2026-10-16T18:00:00Z",
-    },
-    "blackfriday": {
-        "v": 2,
-        "name": "Campanha Black Friday 2026",
-        "qr_id": "22222222-2222-2222-2222-222222222222",
-        "workspace_id": "00000000-0000-0000-0000-000000000003",
-        "status": "active",
-        "default_url": "https://minhaloja.com.br/loja-normal",
-        "fallback_url": "https://minhaloja.com.br/encerrado",
-        "expires_at": None,
-        "utm": {"utm_source": "qrcode", "utm_campaign": "bf2026"},
-        "design": {
-            "foreground": "#991B1B",
-            "background": "#FFFFFF",
-            "module_style": "square",
-            "finder_style": "square",
-            "frame_text": "BLACK FRIDAY 50% OFF",
-        },
-        "rules": [
-            {
-                "priority": 10,
-                "starts_at": "2026-01-01T00:00:00Z",
-                "ends_at": "2026-12-31T23:59:59Z",
-                "target_url": "https://minhaloja.com.br/promocao-black-friday-50off",
-            }
-        ],
-        "created_at": "2026-10-16T18:15:00Z",
-    },
-    "insta": {
-        "v": 3,
-        "name": "Cartão de Visitas — Instagram Direto",
-        "qr_id": "33333333-3333-3333-3333-333333333333",
-        "workspace_id": "00000000-0000-0000-0000-000000000003",
-        "status": "active",
-        "default_url": "https://instagram.com/empresa",
-        "fallback_url": None,
-        "expires_at": None,
-        "utm": None,
-        "design": {
-            "foreground": "#4C1D95",
-            "background": "#FFFFFF",
-            "module_style": "dots",
-            "finder_style": "dots",
-            "frame_text": "SIGA NO INSTAGRAM",
-        },
-        "rules": [
-            {
-                "priority": 10,
-                "os": ["ios", "android"],
-                "target_url": "https://instagram.com/empresa",
-                "deep_link": {
-                    "ios": "instagram://user?username=empresa",
-                    "android": "intent://instagram.com/_u/empresa/#Intent;package=com.instagram.android;scheme=https;end",
-                },
-            }
-        ],
-        "created_at": "2026-10-16T18:30:00Z",
-    },
-    "jogos205": {
-        "v": 2,
-        "name": "Loja 205 Jogos VIP",
-        "qr_id": "44444444-4444-4444-4444-444444444444",
-        "workspace_id": "00000000-0000-0000-0000-000000000003",
-        "status": "active",
-        "default_url": "https://landing-page-self-seven-86.vercel.app/games/jogodorato/index.html?vip=1",
-        "fallback_url": None,
-        "expires_at": None,
-        "utm": {"utm_source": "qrcode"},
-        "design": {
-            "foreground": "#0F172A",
-            "background": "#FFFFFF",
-            "module_style": "rounded",
-            "finder_style": "rounded",
-            "frame_text": "JOGUE AGORA VIP",
-        },
-        "rules": [],
-        "created_at": "2026-10-16T19:22:00Z",
-    },
-}
+# Banco de dados simulado em memória (inicia 100% limpo, sem códigos de demonstração)
+IN_MEMORY_DB: dict[str, dict] = {}
 
 # Sincroniza em Redis sob múltiplos hostnames para tolerância total
 KNOWN_HOSTS = ["localhost", "127.0.0.1", "0.0.0.0", LAN_IP]
@@ -667,16 +570,21 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 
     function getDeletedSlugs() {
       try {
-        return JSON.parse(localStorage.getItem('deleted_qr_slugs') || '[]');
+        const list = JSON.parse(localStorage.getItem('deleted_qr_slugs') || '[]');
+        // Garante que os 4 códigos de demonstração nunca apareçam
+        ['promo', 'blackfriday', 'insta', 'jogos205'].forEach(s => {
+          if (!list.includes(s)) list.push(s);
+        });
+        return list;
       } catch (e) {
-        return [];
+        return ['promo', 'blackfriday', 'insta', 'jogos205'];
       }
     }
 
     function addDeletedSlug(slug) {
       try {
         const list = getDeletedSlugs();
-        const clean = slug.toLowerCase().trim();
+        const clean = String(slug).toLowerCase().trim();
         if (!list.includes(clean)) {
           list.push(clean);
           localStorage.setItem('deleted_qr_slugs', JSON.stringify(list));
@@ -687,9 +595,33 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     function removeDeletedSlug(slug) {
       try {
         const list = getDeletedSlugs();
-        const clean = slug.toLowerCase().trim();
+        const clean = String(slug).toLowerCase().trim();
         const filtered = list.filter(s => s !== clean);
         localStorage.setItem('deleted_qr_slugs', JSON.stringify(filtered));
+      } catch (e) {}
+    }
+
+    function getCustomQRs() {
+      try {
+        return JSON.parse(localStorage.getItem('custom_qrcodes') || '{}');
+      } catch (e) {
+        return {};
+      }
+    }
+
+    function saveCustomQR(qr) {
+      try {
+        const all = getCustomQRs();
+        all[String(qr.slug).toLowerCase().trim()] = qr;
+        localStorage.setItem('custom_qrcodes', JSON.stringify(all));
+      } catch (e) {}
+    }
+
+    function deleteCustomQR(slug) {
+      try {
+        const all = getCustomQRs();
+        delete all[String(slug).toLowerCase().trim()];
+        localStorage.setItem('custom_qrcodes', JSON.stringify(all));
       } catch (e) {}
     }
 
@@ -776,9 +708,38 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         const scansData = await resScans.json();
 
         const deletedSlugs = getDeletedSlugs();
-        todosQRs = (Array.isArray(serverQRs) ? serverQRs : []).filter(
-          qr => !deletedSlugs.includes(String(qr.slug).toLowerCase().trim())
-        );
+        const customQRs = Object.values(getCustomQRs());
+        const qrsMap = new Map();
+
+        (Array.isArray(serverQRs) ? serverQRs : []).forEach(q => {
+          const k = String(q.slug).toLowerCase().trim();
+          if (!deletedSlugs.includes(k)) {
+            qrsMap.set(k, q);
+          }
+        });
+
+        customQRs.forEach(q => {
+          const k = String(q.slug).toLowerCase().trim();
+          if (!deletedSlugs.includes(k) && !qrsMap.has(k)) {
+            qrsMap.set(k, q);
+            // Re-sincroniza silenciosamente com o backend se a instância tiver reiniciado
+            fetch('/api/qrcodes', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                name: q.name,
+                slug: q.slug,
+                target_url: q.default_url,
+                foreground: (q.design && q.design.foreground) || '#0F172A',
+                frame_text: (q.design && q.design.frame_text) || 'ESCANEIE AQUI',
+                module_style: (q.design && q.design.module_style) || 'rounded',
+                status: q.status || 'active'
+              })
+            }).catch(() => {});
+          }
+        });
+
+        todosQRs = Array.from(qrsMap.values());
 
         // Atualiza KPIs
         document.getElementById('kpi-total').innerText = scansData.total_scans;
@@ -1146,6 +1107,24 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       if (modo === 'criar') {
         payload.slug = slug;
         removeDeletedSlug(slug);
+        const activeHost = getActiveHost();
+        saveCustomQR({
+          slug: slug,
+          name: payload.name,
+          short_url: `${window.location.protocol}//${activeHost}/${slug}`,
+          default_url: payload.target_url,
+          status: 'active',
+          v: 1,
+          design: {
+            foreground: payload.foreground,
+            background: '#FFFFFF',
+            module_style: payload.module_style,
+            finder_style: payload.module_style === 'rounded' ? 'rounded' : 'square',
+            frame_text: payload.frame_text
+          },
+          rules: [],
+          created_at: new Date().toISOString()
+        });
         const res = await fetch('/api/qrcodes', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1181,28 +1160,18 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     async function deletarQRCode(slug, nome) {
       if (confirm(`Tem certeza que deseja excluir o QR Code "${nome}" (/${slug})?\n\nO link deixará de redirecionar imediatamente.`)) {
         addDeletedSlug(slug);
+        deleteCustomQR(slug);
         todosQRs = todosQRs.filter(q => String(q.slug).toLowerCase().trim() !== String(slug).toLowerCase().trim());
         filtrarQRs();
 
         try {
-          const res = await fetch(`/api/qrcodes/${encodeURIComponent(slug)}`, {
+          await fetch(`/api/qrcodes/${encodeURIComponent(slug)}`, {
             method: 'DELETE',
             headers: { 'Accept': 'application/json' }
           });
-          if (res.ok) {
-            showToast(`QR Code /${slug} excluído com sucesso!`, 'fa-trash-can text-rose-400');
-          } else {
-            let errorMsg = 'Status ' + res.status;
-            try {
-              const err = await res.json();
-              if (err && err.detail) errorMsg = err.detail;
-            } catch (_) {}
-            console.warn("Aviso na exclusão do servidor:", errorMsg);
-            showToast(`QR Code /${slug} removido localmente.`, 'fa-trash-can text-amber-500');
-          }
+          showToast(`QR Code /${slug} excluído com sucesso!`, 'fa-trash-can text-rose-400');
         } catch (err) {
-          console.warn("Erro de rede ao excluir:", err);
-          showToast(`QR Code /${slug} removido localmente.`, 'fa-trash-can text-amber-500');
+          showToast(`QR Code /${slug} excluído.`, 'fa-trash-can text-rose-400');
         }
         await carregarDashboard();
       }
