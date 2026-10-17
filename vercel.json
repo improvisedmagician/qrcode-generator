@@ -1,10 +1,18 @@
 {
-  "version": 2,
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "app": {
+      "root": ".",
+      "framework": "fastapi",
+      "entrypoint": "main:app"
+    }
+  },
   "rewrites": [
     {
       "source": "/(.*)",
-      "destination": "/api/index.py"
+      "destination": {
+        "service": "app"
+      }
     }
   ]
 }
-
