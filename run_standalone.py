@@ -294,6 +294,10 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
           <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
           Cluster &lt; 5ms
         </div>
+        <button onclick="limparTudo()" class="inline-flex items-center gap-1.5 bg-zinc-100 hover:bg-rose-50 text-zinc-600 hover:text-rose-600 border border-zinc-200 text-xs font-medium px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl transition active:scale-95" title="Limpar todos os QR Codes e dados">
+          <i class="fa-solid fa-trash-can text-[11px]"></i>
+          <span class="hidden sm:inline">Limpar Painel</span>
+        </button>
         <button onclick="abrirModalCriar()" class="inline-flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-semibold px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl shadow-xs transition active:scale-95">
           <i class="fa-solid fa-plus text-[10px]"></i>
           <span>Novo QR</span>
@@ -1174,6 +1178,32 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
           showToast(`QR Code /${slug} excluído.`, 'fa-trash-can text-rose-400');
         }
         await carregarDashboard();
+      }
+    }
+
+    async function limparTudo() {
+      if (!confirm("Deseja apagar todos os QR codes e limpar o painel completamente?")) {
+        return;
+      }
+      try {
+        localStorage.removeItem('custom_qrcodes');
+        localStorage.removeItem('deleted_qr_slugs');
+        const defaultSlugs = ['promo', 'blackfriday', 'insta', 'jogos205'];
+        const currentSlugs = todosQRs.map(q => q.slug);
+        const allSlugs = Array.from(new Set([...defaultSlugs, ...currentSlugs]));
+        allSlugs.forEach(s => addDeletedSlug(s));
+
+        await Promise.allSettled(
+          allSlugs.map(s =>
+            fetch(`/api/qrcodes/${encodeURIComponent(s)}`, { method: 'DELETE' })
+          )
+        );
+        todosQRs = [];
+        filtrarQRs();
+        showToast('Painel limpo com sucesso!', 'fa-trash-can text-rose-400');
+        await carregarDashboard();
+      } catch (err) {
+        console.error("Erro ao limpar painel:", err);
       }
     }
 
