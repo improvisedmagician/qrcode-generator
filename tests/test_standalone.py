@@ -188,6 +188,14 @@ def test_preview_and_export(client):
     assert resp_prev.status_code == 200
     assert resp_prev.headers["content-type"] == "image/svg+xml"
 
+    # Serverless fallback preview (slug que não está no banco em memória não deve retornar 404)
+    resp_prev_stateless = client.get(
+        "/preview/novo-slug-serverless.svg?color=%230F172A&bg_color=%23FFFFFF&frame=SCAN"
+    )
+    assert resp_prev_stateless.status_code == 200
+    assert resp_prev_stateless.headers["content-type"] == "image/svg+xml"
+    assert "<svg" in resp_prev_stateless.text
+
     # Export SVG
     resp_exp_svg = client.get("/export/promo?format=svg")
     assert resp_exp_svg.status_code == 200

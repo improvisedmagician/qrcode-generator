@@ -77,11 +77,77 @@ else:
     redis_async = fakeredis.FakeAsyncRedis(server=fake_server, decode_responses=True)
 
 # Registro de exclusões (tombstones) para impedir ressurgimento de slugs deletados
-# Códigos de demonstração antigos marcados como excluídos por padrão
-DELETED_SLUGS: set[str] = {"promo", "blackfriday", "insta", "jogos205"}
+DELETED_SLUGS: set[str] = set()
 
-# Banco de dados simulado em memória (inicia 100% limpo, sem códigos de demonstração)
-IN_MEMORY_DB: dict[str, dict] = {}
+# Banco de dados simulado em memória (códigos padrão ativos de demonstração)
+IN_MEMORY_DB: dict[str, dict] = {
+    "promo": {
+        "v": 1,
+        "name": "Banner Institucional São Paulo",
+        "qr_id": "11111111-1111-1111-1111-111111111111",
+        "workspace_id": "00000000-0000-0000-0000-000000000003",
+        "status": "active",
+        "default_url": "https://minhaloja.com.br/produtos",
+        "fallback_url": "https://minhaloja.com.br/encerrado",
+        "expires_at": None,
+        "utm": {"utm_source": "qrcode", "utm_medium": "banner-sp"},
+        "design": {
+            "foreground": "#0F172A",
+            "background": "#FFFFFF",
+            "background_type": "solid",
+            "background_color_end": None,
+            "module_style": "rounded",
+            "finder_style": "rounded",
+            "frame_text": "ESCANEIE AQUI",
+        },
+        "rules": [],
+        "created_at": "2026-10-16T18:00:00Z",
+    },
+    "blackfriday": {
+        "v": 2,
+        "name": "Campanha Black Friday 2026",
+        "qr_id": "22222222-2222-2222-2222-222222222222",
+        "workspace_id": "00000000-0000-0000-0000-000000000003",
+        "status": "active",
+        "default_url": "https://minhaloja.com.br/loja-normal",
+        "fallback_url": "https://minhaloja.com.br/encerrado",
+        "expires_at": None,
+        "utm": {"utm_source": "qrcode", "utm_campaign": "bf2026"},
+        "design": {
+            "foreground": "#991B1B",
+            "background": "#FFF1EB",
+            "background_type": "gradient",
+            "background_color_end": "#ACE0F9",
+            "module_style": "square",
+            "finder_style": "square",
+            "frame_text": "BLACK FRIDAY 50% OFF",
+        },
+        "rules": [],
+        "created_at": "2026-10-16T18:15:00Z",
+    },
+    "insta": {
+        "v": 3,
+        "name": "Cartão de Visitas — Instagram Direto",
+        "qr_id": "33333333-3333-3333-3333-333333333333",
+        "workspace_id": "00000000-0000-0000-0000-000000000003",
+        "status": "active",
+        "default_url": "https://instagram.com/empresa",
+        "fallback_url": None,
+        "expires_at": None,
+        "utm": None,
+        "design": {
+            "foreground": "#4C1D95",
+            "background": "#E0F2FE",
+            "background_type": "gradient",
+            "background_color_end": "#DCFCE7",
+            "module_style": "dots",
+            "finder_style": "dots",
+            "frame_text": "SIGA NO INSTAGRAM",
+        },
+        "rules": [],
+        "created_at": "2026-10-16T18:30:00Z",
+    },
+}
 
 # Sincroniza em Redis sob múltiplos hostnames para tolerância total
 KNOWN_HOSTS = ["localhost", "127.0.0.1", "0.0.0.0", LAN_IP]
@@ -691,16 +757,21 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     let todosQRs = [];
     let filtroAtualStatus = 'all';
 
-    function getDeletedSlugs() {
+    // Auto-higienização para restaurar os códigos de demonstração caso o navegador os tenha bloqueado
+    if (!localStorage.getItem('demo_qrs_restored_v3')) {
       try {
         const list = JSON.parse(localStorage.getItem('deleted_qr_slugs') || '[]');
-        // Garante que os 4 códigos de demonstração nunca apareçam
-        ['promo', 'blackfriday', 'insta', 'jogos205'].forEach(s => {
-          if (!list.includes(s)) list.push(s);
-        });
-        return list;
+        const cleaned = list.filter(s => !['promo', 'blackfriday', 'insta'].includes(s));
+        localStorage.setItem('deleted_qr_slugs', JSON.stringify(cleaned));
+        localStorage.setItem('demo_qrs_restored_v3', 'true');
+      } catch (e) {}
+    }
+
+    function getDeletedSlugs() {
+      try {
+        return JSON.parse(localStorage.getItem('deleted_qr_slugs') || '[]');
       } catch (e) {
-        return ['promo', 'blackfriday', 'insta', 'jogos205'];
+        return [];
       }
     }
 
@@ -1084,8 +1155,17 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         const jsName = escapeJs(qr.name);
         const safeUrl = sanitizeUrl(qr.default_url);
         const safeShortUrl = sanitizeUrl(qr.short_url);
-        const displayUrl = escapeHtml(qr.default_url.replace(/^https?:\/\//, ''));
-        const qrImgUrl = `/preview/${encodeURIComponent(qr.slug)}.svg?host_override=${encodeURIComponent(activeHost)}&v=${qr.v || 1}`;
+        const d = qr.design || {};
+        const fgParam = encodeURIComponent(d.foreground || '#0F172A');
+        const bgParam = encodeURIComponent(d.background || '#FFFFFF');
+        const bgTypeParam = encodeURIComponent(d.background_type || 'solid');
+        const bgEndParam = encodeURIComponent(d.background_color_end || '');
+        const frameParam = encodeURIComponent(d.frame_text || 'ESCANEIE AQUI');
+        const styleParam = encodeURIComponent(d.module_style || 'rounded');
+
+        const qrImgUrl = `/preview/${encodeURIComponent(qr.slug)}.svg?host_override=${encodeURIComponent(activeHost)}&v=${qr.v || 1}&color=${fgParam}&bg_color=${bgParam}&bg_type=${bgTypeParam}&bg_color_end=${bgEndParam}&frame=${frameParam}&style=${styleParam}`;
+        const liveFallbackUrl = `/api/preview-live?slug=${encodeURIComponent(qr.slug)}&color=${fgParam}&bg_color=${bgParam}&bg_type=${bgTypeParam}&bg_color_end=${bgEndParam}&frame=${frameParam}&style=${styleParam}&host=${encodeURIComponent(activeHost)}`;
+        const jsLiveFallbackUrl = escapeJs(liveFallbackUrl);
         const jsQrImgUrl = escapeJs(qrImgUrl);
 
         return `
@@ -1103,7 +1183,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
               <!-- Meio: QR Code Thumbnail + Links -->
               <div class="flex items-center gap-3 bg-zinc-50/70 p-2.5 rounded-lg border border-zinc-100">
                 <div class="w-18 h-18 sm:w-20 sm:h-20 shrink-0 bg-white p-1 rounded-lg border border-zinc-200/80 flex items-center justify-center cursor-pointer hover:border-zinc-400 transition" onclick="abrirModalZoom('${jsSlug}', '${jsName}', '${jsQrImgUrl}')" title="Clique para ampliar o QR Code">
-                  <img src="${qrImgUrl}" alt="QR ${safeSlug}" class="w-full h-full object-contain">
+                  <img src="${qrImgUrl}" alt="QR ${safeSlug}" class="w-full h-full object-contain" onerror="this.onerror=null; this.src='${jsLiveFallbackUrl}';">
                 </div>
                 <div class="min-w-0 flex-1 space-y-1">
                   <div>
@@ -1173,14 +1253,25 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         const jsName = escapeJs(qr.name);
         const safeUrl = sanitizeUrl(qr.default_url);
         const safeShortUrl = sanitizeUrl(qr.short_url);
-        const qrImgUrl = `/preview/${encodeURIComponent(qr.slug)}.svg?host_override=${encodeURIComponent(activeHost)}&v=${qr.v || 1}`;
+
+        const d = qr.design || {};
+        const fgParam = encodeURIComponent(d.foreground || '#0F172A');
+        const bgParam = encodeURIComponent(d.background || '#FFFFFF');
+        const bgTypeParam = encodeURIComponent(d.background_type || 'solid');
+        const bgEndParam = encodeURIComponent(d.background_color_end || '');
+        const frameParam = encodeURIComponent(d.frame_text || 'ESCANEIE AQUI');
+        const styleParam = encodeURIComponent(d.module_style || 'rounded');
+
+        const qrImgUrl = `/preview/${encodeURIComponent(qr.slug)}.svg?host_override=${encodeURIComponent(activeHost)}&v=${qr.v || 1}&color=${fgParam}&bg_color=${bgParam}&bg_type=${bgTypeParam}&bg_color_end=${bgEndParam}&frame=${frameParam}&style=${styleParam}`;
+        const liveFallbackUrl = `/api/preview-live?slug=${encodeURIComponent(qr.slug)}&color=${fgParam}&bg_color=${bgParam}&bg_type=${bgTypeParam}&bg_color_end=${bgEndParam}&frame=${frameParam}&style=${styleParam}&host=${encodeURIComponent(activeHost)}`;
+        const jsLiveFallbackUrl = escapeJs(liveFallbackUrl);
         const jsQrImgUrl = escapeJs(qrImgUrl);
 
         return `
           <div class="p-3 sm:px-4 flex items-center justify-between gap-3 hover:bg-zinc-50/70 transition">
             <div class="flex items-center space-x-3 min-w-0">
               <div class="w-10 h-10 shrink-0 bg-white p-0.5 rounded border border-zinc-200 flex items-center justify-center cursor-pointer" onclick="abrirModalZoom('${jsSlug}', '${jsName}', '${jsQrImgUrl}')">
-                <img src="${qrImgUrl}" alt="QR ${safeSlug}" class="w-full h-full object-contain">
+                <img src="${qrImgUrl}" alt="QR ${safeSlug}" class="w-full h-full object-contain" onerror="this.onerror=null; this.src='${jsLiveFallbackUrl}';">
               </div>
               <div class="min-w-0">
                 <div class="flex items-center gap-2">
@@ -1305,8 +1396,13 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     function abrirModalZoom(slug, name, imgUrl) {
       document.getElementById('zoom-title').innerText = name;
       document.getElementById('zoom-slug').innerText = `/${slug}`;
-      document.getElementById('zoom-img').src = imgUrl;
+      const zoomImg = document.getElementById('zoom-img');
       const activeHost = getActiveHost();
+      zoomImg.onerror = function() {
+        this.onerror = null;
+        this.src = `/api/preview-live?slug=${encodeURIComponent(slug)}&host=${encodeURIComponent(activeHost)}`;
+      };
+      zoomImg.src = imgUrl;
       document.getElementById('zoom-btn-svg').href = `/export/${slug}?format=svg&host_override=${encodeURIComponent(activeHost)}`;
       document.getElementById('zoom-btn-png').href = `/export/${slug}?format=png&size=1024&host_override=${encodeURIComponent(activeHost)}`;
       document.getElementById('modal-zoom').classList.remove('hidden');
@@ -1900,10 +1996,20 @@ def live_preview(
 
 
 @app.get("/preview/{slug}.svg")
-async def preview_svg(slug: str, request: Request, host_override: Optional[str] = None):
+async def preview_svg(
+    slug: str,
+    request: Request,
+    host_override: Optional[str] = None,
+    color: Optional[str] = None,
+    bg_color: Optional[str] = None,
+    bg_color_end: Optional[str] = None,
+    bg_type: Optional[str] = None,
+    frame: Optional[str] = None,
+    style: Optional[str] = None,
+):
     clean_slug = slug.strip().lstrip("/").lower()
-    if clean_slug in DELETED_SLUGS:
-        raise HTTPException(status_code=404, detail="Slug não encontrado")
+    active_host = host_override or request.headers.get("host", "localhost")
+
     if clean_slug not in IN_MEMORY_DB and REDIS_URL:
         try:
             meta = await redis_async.get(f"qr_meta:{clean_slug}")
@@ -1912,32 +2018,51 @@ async def preview_svg(slug: str, request: Request, host_override: Optional[str] 
         except Exception:
             pass
 
-    if clean_slug not in IN_MEMORY_DB:
-        raise HTTPException(status_code=404, detail="Slug não encontrado")
+    payload = IN_MEMORY_DB.get(clean_slug)
+    if payload:
+        design_data = payload.get("design", {})
+        fg_col = color or design_data.get("foreground", "#0F172A")
+        bg_col = bg_color or design_data.get("background", "#FFFFFF")
+        bg_t = bg_type or design_data.get("background_type", "solid")
+        bg_end = bg_color_end or design_data.get("background_color_end")
+        m_style = style or design_data.get("module_style", "rounded")
+        f_style = design_data.get("finder_style", "rounded" if m_style == "rounded" else "square")
+        f_text = frame or design_data.get("frame_text", "ESCANEIE AQUI")
+    else:
+        # Fallback resiliente para serverless / lambdas sem estado / cold starts:
+        # Gera o QR Code com base nos parâmetros da requisição ou defaults elegantes,
+        # garantindo que o usuário NUNCA veja um ícone de imagem quebrada.
+        fg_col = color or "#0F172A"
+        bg_col = bg_color or "#FFFFFF"
+        bg_t = bg_type or ("gradient" if bg_color_end else "solid")
+        bg_end = bg_color_end
+        m_style = style or "rounded"
+        f_style = "rounded" if m_style == "rounded" else "square"
+        f_text = frame or "ESCANEIE AQUI"
 
-    payload = IN_MEMORY_DB[clean_slug]
-    design_data = payload.get("design", {})
-    bg_color = design_data.get("background", "#FFFFFF")
-    bg_type = design_data.get("background_type", "solid")
-    bg_color_end = design_data.get("background_color_end")
+    try:
+        validate(QRDesign(foreground=fg_col, background=bg_col))
+    except InvalidDesign:
+        fg_col = "#0F172A"
+        bg_col = "#FFFFFF"
 
     design = QRDesign(
-        foreground=design_data.get("foreground", "#0F172A"),
-        background=bg_color,
-        module_style=design_data.get("module_style", "rounded"),
-        finder_style=design_data.get("finder_style", "rounded"),
-        frame_text=design_data.get("frame_text", "ESCANEIE AQUI"),
+        foreground=fg_col,
+        background=bg_col,
+        module_style=m_style,
+        finder_style=f_style,
+        frame_text=f_text,
     )
-    active_host = host_override or request.headers.get("host", "localhost")
+
     try:
         svg_bytes = render(f"http://{active_host}/{clean_slug}", design=design, fmt="svg", size_px=400)
-    except InvalidDesign:
+    except Exception:
         design.foreground = "#0F172A"
         design.background = "#FFFFFF"
         svg_bytes = render(f"http://{active_host}/{clean_slug}", design=design, fmt="svg", size_px=400)
 
-    if bg_type == "gradient" and bg_color_end:
-        svg_bytes = apply_svg_gradient(svg_bytes, bg_color, bg_color_end)
+    if bg_t == "gradient" and bg_end:
+        svg_bytes = apply_svg_gradient(svg_bytes, bg_col, bg_end)
 
     return Response(content=svg_bytes, media_type="image/svg+xml")
 
@@ -1979,10 +2104,16 @@ async def export_qr(
     format: str = Query("svg", pattern=r"^(svg|png|pdf)$"),
     size: int = 1024,
     host_override: Optional[str] = None,
+    color: Optional[str] = None,
+    bg_color: Optional[str] = None,
+    bg_color_end: Optional[str] = None,
+    bg_type: Optional[str] = None,
+    frame: Optional[str] = None,
+    style: Optional[str] = None,
 ):
     clean_slug = slug.strip().lstrip("/").lower()
-    if clean_slug in DELETED_SLUGS:
-        raise HTTPException(status_code=404, detail="Slug não encontrado")
+    active_host = host_override or request.headers.get("host", "localhost")
+
     if clean_slug not in IN_MEMORY_DB and REDIS_URL:
         try:
             meta = await redis_async.get(f"qr_meta:{clean_slug}")
@@ -1991,23 +2122,32 @@ async def export_qr(
         except Exception:
             pass
 
-    if clean_slug not in IN_MEMORY_DB:
-        raise HTTPException(status_code=404, detail="Slug não encontrado")
-
-    payload = IN_MEMORY_DB[clean_slug]
-    design_data = payload.get("design", {})
-    bg_color = design_data.get("background", "#FFFFFF")
-    bg_type = design_data.get("background_type", "solid")
-    bg_color_end = design_data.get("background_color_end")
+    payload = IN_MEMORY_DB.get(clean_slug)
+    if payload:
+        design_data = payload.get("design", {})
+        fg_col = color or design_data.get("foreground", "#0F172A")
+        bg_col = bg_color or design_data.get("background", "#FFFFFF")
+        bg_t = bg_type or design_data.get("background_type", "solid")
+        bg_end = bg_color_end or design_data.get("background_color_end")
+        m_style = style or design_data.get("module_style", "rounded")
+        f_style = design_data.get("finder_style", "rounded" if m_style == "rounded" else "square")
+        f_text = frame or design_data.get("frame_text", "ESCANEIE AQUI")
+    else:
+        fg_col = color or "#0F172A"
+        bg_col = bg_color or "#FFFFFF"
+        bg_t = bg_type or ("gradient" if bg_color_end else "solid")
+        bg_end = bg_color_end
+        m_style = style or "rounded"
+        f_style = "rounded" if m_style == "rounded" else "square"
+        f_text = frame or "ESCANEIE AQUI"
 
     design = QRDesign(
-        foreground=design_data.get("foreground", "#0F172A"),
-        background=bg_color,
-        module_style=design_data.get("module_style", "rounded"),
-        finder_style=design_data.get("finder_style", "rounded"),
-        frame_text=design_data.get("frame_text", "ESCANEIE AQUI"),
+        foreground=fg_col,
+        background=bg_col,
+        module_style=m_style,
+        finder_style=f_style,
+        frame_text=f_text,
     )
-    active_host = host_override or request.headers.get("host", "localhost")
     try:
         content = render(f"http://{active_host}/{clean_slug}", design=design, fmt=format, size_px=size)
     except InvalidDesign:
@@ -2018,8 +2158,8 @@ async def export_qr(
         log.error("Erro ao exportar QR code /%s (%s): %r", clean_slug, format, exc)
         raise HTTPException(status_code=500, detail="Erro interno ao gerar arquivo de exportação")
 
-    if format == "svg" and bg_type == "gradient" and bg_color_end:
-        content = apply_svg_gradient(content, bg_color, bg_color_end)
+    if format == "svg" and bg_t == "gradient" and bg_end:
+        content = apply_svg_gradient(content, bg_col, bg_end)
 
     media_types = {"svg": "image/svg+xml", "png": "image/png", "pdf": "application/pdf"}
     return Response(
