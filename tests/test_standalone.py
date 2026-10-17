@@ -383,6 +383,62 @@ def test_clicks_counting_per_qrcode(client):
     assert scans_data["clicks_by_slug"].get(slug) == initial_clicks + 3
 
 
+def test_qr_and_dashboard_gradient_background(client):
+    # 1. Verifica se a interface possui o seletor de fundo
+    resp_dash = client.get("/")
+    assert resp_dash.status_code == 200
+    assert "btn-menu-fundo" in resp_dash.text
+    assert "dropdown-fundo" in resp_dash.text
+    assert "aplicarFundoDashboard" in resp_dash.text
+    assert "Gradiente Aurora" in resp_dash.text
+
+    # 2. Live preview com fundo gradiente
+    resp_live = client.get(
+        "/api/preview-live?slug=live-grad&color=%23000000&bg_type=gradient&bg_color=%23FFF1EB&bg_color_end=%23ACE0F9"
+    )
+    assert resp_live.status_code == 200
+    assert resp_live.headers["content-type"] == "image/svg+xml"
+    assert "<linearGradient id=\"qr-bg-grad\"" in resp_live.text
+    assert "url(#qr-bg-grad)" in resp_live.text
+
+    # 3. Criação de QR Code com fundo gradiente
+    grad_slug = "qr-com-gradiente"
+    resp_create = client.post(
+        "/api/qrcodes",
+        json={
+            "name": "QR Gradiente Sunset",
+            "slug": grad_slug,
+            "target_url": "https://meusite.com.br/sunset",
+            "foreground": "#0F172A",
+            "background": "#FFF1EB",
+            "background_type": "gradient",
+            "background_color_end": "#ACE0F9",
+            "frame_text": "ACESSE AGORA",
+            "module_style": "rounded",
+            "status": "active",
+        },
+    )
+    assert resp_create.status_code == 200
+    assert resp_create.json()["status"] == "created"
+
+    # 4. Preview SVG do QR Code criado deve conter o gradiente
+    resp_prev = client.get(f"/preview/{grad_slug}.svg")
+    assert resp_prev.status_code == 200
+    assert resp_prev.headers["content-type"] == "image/svg+xml"
+    assert "<linearGradient id=\"qr-bg-grad\"" in resp_prev.text
+    assert "url(#qr-bg-grad)" in resp_prev.text
+
+    # 5. Exportação SVG e PNG com fundo gradiente
+    resp_exp_svg = client.get(f"/export/{grad_slug}?format=svg")
+    assert resp_exp_svg.status_code == 200
+    assert "<linearGradient id=\"qr-bg-grad\"" in resp_exp_svg.text
+
+    resp_exp_png = client.get(f"/export/{grad_slug}?format=png&size=256")
+    assert resp_exp_png.status_code == 200
+    assert resp_exp_png.headers["content-type"] == "image/png"
+
+
+
 
 
 

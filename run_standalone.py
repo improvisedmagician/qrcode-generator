@@ -229,6 +229,9 @@ class QRCreateDTO(BaseModel):
     slug: str = Field(min_length=1, max_length=100)
     target_url: str
     foreground: str = "#0F172A"
+    background: str = "#FFFFFF"
+    background_type: str = "solid"  # "solid" | "gradient"
+    background_color_end: Optional[str] = None
     frame_text: Optional[str] = "ESCANEIE AQUI"
     module_style: str = "rounded"
     status: str = "active"
@@ -239,6 +242,9 @@ class QRUpdateDTO(BaseModel):
     target_url: Optional[str] = None
     status: Optional[str] = None
     foreground: Optional[str] = None
+    background: Optional[str] = None
+    background_type: Optional[str] = None
+    background_color_end: Optional[str] = None
     frame_text: Optional[str] = None
     module_style: Optional[str] = None
 
@@ -280,7 +286,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 <body class="min-h-full font-sans text-zinc-900 antialiased flex flex-col">
 
   <!-- Navbar Compacta e Funcional (56px) -->
-  <header class="bg-white border-b border-zinc-200/80 sticky top-0 z-30 shadow-2xs">
+  <header class="bg-white/95 backdrop-blur-md border-b border-zinc-200/80 sticky top-0 z-30 shadow-2xs transition-colors">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-3">
       
       <!-- Brand & Status -->
@@ -297,11 +303,65 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 
 
       <!-- Botões de Ação -->
-      <div class="flex items-center space-x-2 shrink-0">
-        <div class="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/60">
+      <div class="flex items-center space-x-1.5 sm:space-x-2 shrink-0">
+        <div class="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/60">
           <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block shadow-[0_0_6px_rgba(16,185,129,0.8)]"></span>
           Cluster &lt; 5ms
         </div>
+
+        <!-- Seletor de Fundo do Dashboard -->
+        <div class="relative" id="container-seletor-fundo">
+          <button type="button" onclick="toggleMenuFundo(event)" id="btn-menu-fundo" class="inline-flex items-center gap-1.5 bg-zinc-100 hover:bg-zinc-200/80 text-zinc-700 border border-zinc-200 text-xs font-semibold px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl transition active:scale-95" title="Mudar plano de fundo do painel">
+            <i class="fa-solid fa-palette text-indigo-600 text-xs"></i>
+            <span class="hidden sm:inline">Fundo</span>
+            <i class="fa-solid fa-chevron-down text-[9px] text-zinc-400"></i>
+          </button>
+          
+          <div id="dropdown-fundo" class="hidden absolute right-0 mt-2 w-56 bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-zinc-200/80 py-1.5 z-50">
+            <div class="px-3 py-1.5 text-[10px] font-bold text-zinc-400 uppercase tracking-wider border-b border-zinc-100 flex items-center justify-between">
+              <span>Fundo da Tela</span>
+              <span class="text-[9px] text-indigo-600 font-semibold">Ao vivo</span>
+            </div>
+            <div class="p-1 space-y-0.5">
+              <button type="button" onclick="aplicarFundoDashboard('default')" class="w-full px-2.5 py-1.5 rounded-lg text-left text-xs text-zinc-700 hover:bg-zinc-100 flex items-center justify-between transition">
+                <span class="flex items-center gap-2">
+                  <span class="w-3.5 h-3.5 rounded-full bg-zinc-200 border border-zinc-300 inline-block shrink-0"></span>
+                  <span>Padrão (Clean Zinc)</span>
+                </span>
+                <i id="check-bg-default" class="fa-solid fa-check text-indigo-600 text-[11px]"></i>
+              </button>
+              <button type="button" onclick="aplicarFundoDashboard('aurora')" class="w-full px-2.5 py-1.5 rounded-lg text-left text-xs text-zinc-700 hover:bg-zinc-100 flex items-center justify-between transition">
+                <span class="flex items-center gap-2">
+                  <span class="w-3.5 h-3.5 rounded-full bg-gradient-to-tr from-teal-200 via-indigo-200 to-purple-200 border border-teal-300 inline-block shrink-0"></span>
+                  <span>Gradiente Aurora</span>
+                </span>
+                <i id="check-bg-aurora" class="fa-solid fa-check text-indigo-600 text-[11px] hidden"></i>
+              </button>
+              <button type="button" onclick="aplicarFundoDashboard('sunset')" class="w-full px-2.5 py-1.5 rounded-lg text-left text-xs text-zinc-700 hover:bg-zinc-100 flex items-center justify-between transition">
+                <span class="flex items-center gap-2">
+                  <span class="w-3.5 h-3.5 rounded-full bg-gradient-to-tr from-amber-200 via-rose-200 to-indigo-200 border border-amber-300 inline-block shrink-0"></span>
+                  <span>Gradiente Sunset</span>
+                </span>
+                <i id="check-bg-sunset" class="fa-solid fa-check text-indigo-600 text-[11px] hidden"></i>
+              </button>
+              <button type="button" onclick="aplicarFundoDashboard('mesh')" class="w-full px-2.5 py-1.5 rounded-lg text-left text-xs text-zinc-700 hover:bg-zinc-100 flex items-center justify-between transition">
+                <span class="flex items-center gap-2">
+                  <span class="w-3.5 h-3.5 rounded-full bg-gradient-to-tr from-indigo-300 via-purple-300 to-pink-300 border border-indigo-300 inline-block shrink-0"></span>
+                  <span>Gradiente Cyber Mesh</span>
+                </span>
+                <i id="check-bg-mesh" class="fa-solid fa-check text-indigo-600 text-[11px] hidden"></i>
+              </button>
+              <button type="button" onclick="aplicarFundoDashboard('dark')" class="w-full px-2.5 py-1.5 rounded-lg text-left text-xs text-zinc-700 hover:bg-zinc-100 flex items-center justify-between transition">
+                <span class="flex items-center gap-2">
+                  <span class="w-3.5 h-3.5 rounded-full bg-gradient-to-tr from-slate-900 via-indigo-950 to-zinc-900 border border-zinc-500 inline-block shrink-0"></span>
+                  <span>Gradiente Dark Slate</span>
+                </span>
+                <i id="check-bg-dark" class="fa-solid fa-check text-indigo-600 text-[11px] hidden"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+
         <button onclick="limparTudo()" class="inline-flex items-center gap-1.5 bg-zinc-100 hover:bg-rose-50 text-zinc-600 hover:text-rose-600 border border-zinc-200 text-xs font-medium px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl transition active:scale-95" title="Limpar todos os QR Codes e dados">
           <i class="fa-solid fa-trash-can text-[11px]"></i>
           <span class="hidden sm:inline">Limpar Painel</span>
@@ -496,6 +556,57 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
                     <option value="square">Quadrado</option>
                     <option value="dots">Bolinhas</option>
                   </select>
+                </div>
+              </div>
+
+              <!-- Plano de Fundo do QR Code (Sólido ou Gradiente) -->
+              <div class="pt-2 border-t border-zinc-100 space-y-2">
+                <div class="flex items-center justify-between">
+                  <label class="block text-[11px] font-semibold text-zinc-700">Fundo do QR Code</label>
+                  <div class="flex items-center space-x-1 bg-zinc-100 p-0.5 rounded-lg border border-zinc-200 text-[10px]">
+                    <button type="button" onclick="setModoFundo('solid')" id="btn-bg-solid" class="font-semibold px-2 py-0.5 rounded bg-white text-zinc-900 shadow-2xs transition">Sólido</button>
+                    <button type="button" onclick="setModoFundo('gradient')" id="btn-bg-grad" class="font-medium px-2 py-0.5 rounded text-zinc-600 hover:text-zinc-900 transition">Gradiente</button>
+                  </div>
+                </div>
+
+                <!-- Fundo Sólido -->
+                <div id="secao-fundo-solido" class="flex items-center space-x-2">
+                  <input type="color" id="input-bg-cor" value="#FFFFFF" class="w-8 h-7 rounded border border-zinc-200 p-0.5 cursor-pointer shrink-0" onchange="atualizarPreviewLive()">
+                  <div class="flex items-center space-x-1">
+                    <button type="button" onclick="setBgCor('#FFFFFF')" class="w-4 h-4 rounded-full bg-[#FFFFFF] border border-zinc-300 shadow-2xs" title="Branco"></button>
+                    <button type="button" onclick="setBgCor('#F8FAFC')" class="w-4 h-4 rounded-full bg-[#F8FAFC] border border-zinc-300" title="Gelo"></button>
+                    <button type="button" onclick="setBgCor('#FEF9C3')" class="w-4 h-4 rounded-full bg-[#FEF9C3] border border-zinc-300" title="Creme"></button>
+                    <button type="button" onclick="setBgCor('#ECFDF5')" class="w-4 h-4 rounded-full bg-[#ECFDF5] border border-zinc-300" title="Menta"></button>
+                    <button type="button" onclick="setBgCor('#F5F3FF')" class="w-4 h-4 rounded-full bg-[#F5F3FF] border border-zinc-300" title="Lavanda"></button>
+                    <button type="button" onclick="setBgCor('#EFF6FF')" class="w-4 h-4 rounded-full bg-[#EFF6FF] border border-zinc-300" title="Céu"></button>
+                  </div>
+                  <span class="text-[10px] text-zinc-400 ml-auto hidden sm:inline">Tons claros seguros</span>
+                </div>
+
+                <!-- Fundo Gradiente -->
+                <div id="secao-fundo-gradiente" class="hidden space-y-2">
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div>
+                      <label class="block text-[10px] text-zinc-500 mb-0.5 font-medium">Preset de Gradiente</label>
+                      <select id="select-gradiente-preset" class="w-full text-xs rounded-lg border border-zinc-200 px-2 py-1 outline-none bg-white" onchange="selecionarPresetGradiente(this.value)">
+                        <option value="sunset">🌅 Sunset Suave</option>
+                        <option value="aurora">🌌 Aurora Boreal</option>
+                        <option value="cotton">🌸 Algodão Doce</option>
+                        <option value="champagne">🌾 Champagne</option>
+                        <option value="peach">🍑 Pêssego Dourado</option>
+                        <option value="custom">🎨 Personalizado</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label class="block text-[10px] text-zinc-500 mb-0.5 font-medium">Início ➔ Fim (135°)</label>
+                      <div class="flex items-center space-x-1.5">
+                        <input type="color" id="input-grad-c1" value="#FFF1EB" class="w-8 h-7 rounded border border-zinc-200 p-0.5 cursor-pointer shrink-0" onchange="atualizarPreviewLive()">
+                        <i class="fa-solid fa-arrow-right text-[9px] text-zinc-400"></i>
+                        <input type="color" id="input-grad-c2" value="#ACE0F9" class="w-8 h-7 rounded border border-zinc-200 p-0.5 cursor-pointer shrink-0" onchange="atualizarPreviewLive()">
+                        <span class="text-[10px] text-zinc-400 font-mono">135°</span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -709,6 +820,94 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       atualizarPreviewLive();
     }
 
+    // Gerenciador de Plano de Fundo do Dashboard
+    const THEME_CLASSES = {
+      default: ['bg-zinc-50/80'],
+      aurora: ['bg-gradient-to-br', 'from-slate-50', 'via-teal-50/40', 'to-indigo-100/50', 'bg-fixed'],
+      sunset: ['bg-gradient-to-br', 'from-amber-50/40', 'via-rose-50/30', 'to-indigo-50/40', 'bg-fixed'],
+      mesh: ['bg-gradient-to-br', 'from-indigo-50/60', 'via-purple-50/40', 'to-pink-50/30', 'bg-fixed'],
+      dark: ['bg-gradient-to-br', 'from-slate-950', 'via-zinc-900', 'to-indigo-950', 'bg-fixed']
+    };
+
+    function toggleMenuFundo(event) {
+      if (event) event.stopPropagation();
+      const menu = document.getElementById('dropdown-fundo');
+      if (menu) menu.classList.toggle('hidden');
+    }
+
+    function fecharMenuFundo() {
+      const menu = document.getElementById('dropdown-fundo');
+      if (menu) menu.classList.add('hidden');
+    }
+
+    function aplicarFundoDashboard(theme) {
+      localStorage.setItem('dashboard_bg_theme', theme);
+      const body = document.body;
+      const allClassList = [
+        'bg-zinc-50/80', 'bg-fixed', 'bg-gradient-to-br',
+        'from-slate-50', 'via-teal-50/40', 'to-indigo-100/50',
+        'from-amber-50/40', 'via-rose-50/30', 'to-indigo-50/40',
+        'from-indigo-50/60', 'via-purple-50/40', 'to-pink-50/30',
+        'from-slate-950', 'via-zinc-900', 'to-indigo-950'
+      ];
+      body.classList.remove(...allClassList);
+      const toAdd = THEME_CLASSES[theme] || THEME_CLASSES.default;
+      body.classList.add(...toAdd);
+
+      ['default', 'aurora', 'sunset', 'mesh', 'dark'].forEach(t => {
+        const el = document.getElementById('check-bg-' + t);
+        if (el) el.classList.toggle('hidden', t !== theme);
+      });
+      fecharMenuFundo();
+    }
+
+    // Configuração de Fundo do QR Code (Modal)
+    let tipoFundoAtual = 'solid'; // 'solid' | 'gradient'
+
+    const PRESETS_GRADIENTE = {
+      sunset: ['#FFF1EB', '#ACE0F9'],
+      aurora: ['#E0F2FE', '#DCFCE7'],
+      cotton: ['#FCE7F3', '#E0E7FF'],
+      champagne: ['#FEF3C7', '#FFFBEB'],
+      peach: ['#FED7AA', '#FEE2E2'],
+      custom: ['#E2E8F0', '#CBD5E1']
+    };
+
+    function setModoFundo(modo) {
+      tipoFundoAtual = modo;
+      const btnSolid = document.getElementById('btn-bg-solid');
+      const btnGrad = document.getElementById('btn-bg-grad');
+      const secSolid = document.getElementById('secao-fundo-solido');
+      const secGrad = document.getElementById('secao-fundo-gradiente');
+
+      if (modo === 'solid') {
+        btnSolid.className = 'font-semibold px-2 py-0.5 rounded bg-white text-zinc-900 shadow-2xs transition';
+        btnGrad.className = 'font-medium px-2 py-0.5 rounded text-zinc-600 hover:text-zinc-900 transition';
+        secSolid.classList.remove('hidden');
+        secGrad.classList.add('hidden');
+      } else {
+        btnGrad.className = 'font-semibold px-2 py-0.5 rounded bg-white text-zinc-900 shadow-2xs transition';
+        btnSolid.className = 'font-medium px-2 py-0.5 rounded text-zinc-600 hover:text-zinc-900 transition';
+        secGrad.classList.remove('hidden');
+        secSolid.classList.add('hidden');
+      }
+      atualizarPreviewLive();
+    }
+
+    function setBgCor(hex) {
+      document.getElementById('input-bg-cor').value = hex;
+      atualizarPreviewLive();
+    }
+
+    function selecionarPresetGradiente(preset) {
+      if (PRESETS_GRADIENTE[preset]) {
+        const [c1, c2] = PRESETS_GRADIENTE[preset];
+        document.getElementById('input-grad-c1').value = c1;
+        document.getElementById('input-grad-c2').value = c2;
+      }
+      atualizarPreviewLive();
+    }
+
     function getStoredScans() {
       try {
         return JSON.parse(localStorage.getItem('cached_scans') || '[]');
@@ -774,6 +973,9 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
                 slug: q.slug,
                 target_url: q.default_url,
                 foreground: (q.design && q.design.foreground) || '#0F172A',
+                background: (q.design && q.design.background) || '#FFFFFF',
+                background_type: (q.design && q.design.background_type) || 'solid',
+                background_color_end: q.design && q.design.background_color_end,
                 frame_text: (q.design && q.design.frame_text) || 'ESCANEIE AQUI',
                 module_style: (q.design && q.design.module_style) || 'rounded',
                 status: q.status || 'active'
@@ -1053,6 +1255,11 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       document.getElementById('input-slug').disabled = false;
       document.getElementById('form-qr').reset();
       document.getElementById('input-cor').value = "#0F172A";
+      document.getElementById('input-bg-cor').value = "#FFFFFF";
+      document.getElementById('input-grad-c1').value = "#FFF1EB";
+      document.getElementById('input-grad-c2').value = "#ACE0F9";
+      document.getElementById('select-gradiente-preset').value = "sunset";
+      setModoFundo('solid');
       document.getElementById('input-frame').value = "ESCANEIE AQUI";
       document.getElementById('modal-qr').classList.remove('hidden');
       atualizarPreviewLive();
@@ -1072,10 +1279,19 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       document.getElementById('input-slug').value = qr.slug;
       document.getElementById('input-slug').disabled = true; // Slug fixo para manter consistência impressa
       document.getElementById('input-url').value = qr.default_url;
-      document.getElementById('input-frame').value = (qr.design && qr.design.frame_text) || "ESCANEIE AQUI";
-      document.getElementById('input-cor').value = (qr.design && qr.design.foreground) || "#0F172A";
-      document.getElementById('input-estilo').value = (qr.design && qr.design.module_style) || "rounded";
-      document.getElementById('input-status').value = qr.status;
+      const d = qr.design || {};
+      document.getElementById('input-frame').value = d.frame_text || "ESCANEIE AQUI";
+      document.getElementById('input-cor').value = d.foreground || "#0F172A";
+      document.getElementById('input-estilo').value = d.module_style || "rounded";
+      document.getElementById('input-status').value = qr.status || "active";
+
+      const bgType = d.background_type || 'solid';
+      setModoFundo(bgType);
+      document.getElementById('input-bg-cor').value = d.background || "#FFFFFF";
+      if (bgType === 'gradient' && d.background_color_end) {
+        document.getElementById('input-grad-c1').value = d.background || "#FFF1EB";
+        document.getElementById('input-grad-c2').value = d.background_color_end || "#ACE0F9";
+      }
 
       document.getElementById('modal-qr').classList.remove('hidden');
       atualizarPreviewLive();
@@ -1100,14 +1316,18 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       document.getElementById('modal-zoom').classList.add('hidden');
     }
 
-    function calcularContraste(hex) {
+    function calcularContraste(fg, bg = '#FFFFFF') {
       try {
-        const r = parseInt(hex.slice(1, 3), 16) / 255;
-        const g = parseInt(hex.slice(3, 5), 16) / 255;
-        const b = parseInt(hex.slice(5, 7), 16) / 255;
-        const toLum = c => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
-        const L = 0.2126 * toLum(r) + 0.7152 * toLum(g) + 0.0722 * toLum(b);
-        return (1.0 + 0.05) / (L + 0.05); // rácio de contraste contra fundo branco
+        const getLum = hex => {
+          const r = parseInt(hex.slice(1, 3), 16) / 255;
+          const g = parseInt(hex.slice(3, 5), 16) / 255;
+          const b = parseInt(hex.slice(5, 7), 16) / 255;
+          const toLum = c => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+          return 0.2126 * toLum(r) + 0.7152 * toLum(g) + 0.0722 * toLum(b);
+        };
+        const L1 = getLum(fg);
+        const L2 = getLum(bg);
+        return (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
       } catch (e) {
         return 21;
       }
@@ -1127,10 +1347,15 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         const cor = document.getElementById('input-cor').value;
         const frame = document.getElementById('input-frame').value;
         const estilo = document.getElementById('input-estilo').value;
+        const modoBg = tipoFundoAtual;
+        const bgCor = modoBg === 'gradient' ? document.getElementById('input-grad-c1').value : document.getElementById('input-bg-cor').value;
+        const bgCorEnd = document.getElementById('input-grad-c2').value;
         const activeHost = getActiveHost();
 
         // Verificação de Contraste em tempo real (WCAG 4:1)
-        const ratio = calcularContraste(cor);
+        const ratio1 = calcularContraste(cor, bgCor);
+        const ratio2 = modoBg === 'gradient' ? calcularContraste(cor, bgCorEnd) : ratio1;
+        const ratio = Math.min(ratio1, ratio2);
         const badge = document.getElementById('preview-contrast-badge');
         if (ratio >= 3.0) {
           badge.innerHTML = `
@@ -1146,14 +1371,14 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
           `;
         } else {
           badge.innerHTML = `
-            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-semibold bg-amber-50 text-amber-800 border border-amber-200" title="Quase invisível sobre fundo branco">
-              <i class="fa-solid fa-triangle-exclamation text-[8px] text-amber-600"></i> Quase branco (${ratio.toFixed(1)}:1) • Ajustado
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-semibold bg-amber-50 text-amber-800 border border-amber-200" title="Contraste baixo com o fundo">
+              <i class="fa-solid fa-triangle-exclamation text-[8px] text-amber-600"></i> Baixo contraste (${ratio.toFixed(1)}:1) • Ajustado
             </span>
           `;
         }
 
         try {
-          const res = await fetch(`/api/preview-live?slug=${encodeURIComponent(slug)}&color=${encodeURIComponent(cor)}&frame=${encodeURIComponent(frame)}&style=${encodeURIComponent(estilo)}&host=${encodeURIComponent(activeHost)}`);
+          const res = await fetch(`/api/preview-live?slug=${encodeURIComponent(slug)}&color=${encodeURIComponent(cor)}&frame=${encodeURIComponent(frame)}&style=${encodeURIComponent(estilo)}&host=${encodeURIComponent(activeHost)}&bg_type=${encodeURIComponent(modoBg)}&bg_color=${encodeURIComponent(bgCor)}&bg_color_end=${encodeURIComponent(bgCorEnd)}`);
           if (res.ok) {
             const svg = await res.text();
             document.getElementById('preview-svg-box').innerHTML = svg;
@@ -1175,10 +1400,17 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         return;
       }
 
+      const modoBg = tipoFundoAtual;
+      const bgCor = modoBg === 'gradient' ? document.getElementById('input-grad-c1').value : document.getElementById('input-bg-cor').value;
+      const bgCorEnd = modoBg === 'gradient' ? document.getElementById('input-grad-c2').value : null;
+
       const payload = {
         name: document.getElementById('input-nome').value.trim(),
         target_url: document.getElementById('input-url').value.trim(),
         foreground: document.getElementById('input-cor').value,
+        background: bgCor,
+        background_type: modoBg,
+        background_color_end: bgCorEnd,
         frame_text: document.getElementById('input-frame').value,
         module_style: document.getElementById('input-estilo').value,
       };
@@ -1196,7 +1428,9 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
           v: 1,
           design: {
             foreground: payload.foreground,
-            background: '#FFFFFF',
+            background: payload.background,
+            background_type: payload.background_type,
+            background_color_end: payload.background_color_end,
             module_style: payload.module_style,
             finder_style: payload.module_style === 'rounded' ? 'rounded' : 'square',
             frame_text: payload.frame_text
@@ -1292,6 +1526,9 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         prompt("Copie o link abaixo:", url);
       });
     }
+
+    // Inicialização do tema de fundo do painel
+    aplicarFundoDashboard(localStorage.getItem('dashboard_bg_theme') || 'default');
 
     // Inicialização e Polling de Scans a cada 2.5s
     carregarDashboard();
@@ -1443,10 +1680,12 @@ async def create_qr_api(body: QRCreateDTO, request: Request):
 
     # Auto-ajuste de contraste para garantir leitura por qualquer câmera
     fg = body.foreground
+    bg = body.background or "#FFFFFF"
     try:
-        validate(QRDesign(foreground=fg, background="#FFFFFF"))
+        validate(QRDesign(foreground=fg, background=bg))
     except InvalidDesign:
         fg = "#0F172A"
+        bg = "#FFFFFF"
 
     payload = {
         "v": 1,
@@ -1460,7 +1699,9 @@ async def create_qr_api(body: QRCreateDTO, request: Request):
         "utm": {"utm_source": "qrcode"},
         "design": {
             "foreground": fg,
-            "background": "#FFFFFF",
+            "background": bg,
+            "background_type": body.background_type or "solid",
+            "background_color_end": body.background_color_end,
             "module_style": body.module_style,
             "finder_style": "rounded" if body.module_style == "rounded" else "square",
             "frame_text": body.frame_text,
@@ -1533,13 +1774,23 @@ async def update_qr_api(slug: str, body: QRUpdateDTO, request: Request):
         item["status"] = body.status
 
     design = item.get("design", {})
-    if body.foreground is not None:
-        fg = body.foreground
+    if body.foreground is not None or body.background is not None:
+        fg = body.foreground if body.foreground is not None else design.get("foreground", "#0F172A")
+        bg = body.background if body.background is not None else design.get("background", "#FFFFFF")
         try:
-            validate(QRDesign(foreground=fg, background="#FFFFFF"))
+            validate(QRDesign(foreground=fg, background=bg))
         except InvalidDesign:
-            fg = "#0F172A"
+            if body.foreground is not None:
+                fg = "#0F172A"
+            if body.background is not None:
+                bg = "#FFFFFF"
         design["foreground"] = fg
+        design["background"] = bg
+
+    if body.background_type is not None:
+        design["background_type"] = body.background_type
+    if body.background_color_end is not None:
+        design["background_color_end"] = body.background_color_end
 
     if body.frame_text is not None:
         design["frame_text"] = body.frame_text
@@ -1593,28 +1844,58 @@ async def delete_qr_api(slug: str, request: Request):
     return {"status": "deleted", "slug": clean_slug}
 
 
+def apply_svg_gradient(svg_bytes: bytes, bg_start: str, bg_end: str, gradient_id: str = "qr-bg-grad") -> bytes:
+    try:
+        svg_str = svg_bytes.decode("utf-8")
+        gradient_def = (
+            f'<defs>'
+            f'<linearGradient id="{gradient_id}" x1="0%" y1="0%" x2="100%" y2="100%">'
+            f'<stop offset="0%" stop-color="{bg_start}"/>'
+            f'<stop offset="100%" stop-color="{bg_end}"/>'
+            f'</linearGradient>'
+            f'</defs>'
+        )
+        svg_str = re.sub(r"(<svg[^>]*>)", r"\1" + gradient_def, svg_str, count=1)
+        # Substitui a primeira ocorrência do fill com a cor de fundo pelo gradiente linear
+        svg_str = re.sub(
+            rf'fill="{re.escape(bg_start)}"',
+            f'fill="url(#{gradient_id})"',
+            svg_str,
+            count=1,
+        )
+        return svg_str.encode("utf-8")
+    except Exception:
+        return svg_bytes
+
+
 # Preview Dinâmico do Modal (Live Preview enquanto digita)
 @app.get("/api/preview-live")
 def live_preview(
     slug: str = "preview",
     color: str = "#0F172A",
+    bg_color: str = "#FFFFFF",
+    bg_color_end: Optional[str] = None,
+    bg_type: str = "solid",
     frame: str = "ESCANEIE AQUI",
     style: str = "rounded",
     host: str = "localhost",
 ):
     try:
-        validate(QRDesign(foreground=color, background="#FFFFFF"))
+        validate(QRDesign(foreground=color, background=bg_color))
     except InvalidDesign:
         color = "#0F172A"
+        bg_color = "#FFFFFF"
 
     design = QRDesign(
         foreground=color,
-        background="#FFFFFF",
+        background=bg_color,
         module_style=style,
         finder_style="rounded" if style == "rounded" else "square",
         frame_text=frame,
     )
     svg_bytes = render(f"http://{host}/{slug}", design=design, fmt="svg", size_px=320)
+    if bg_type == "gradient" and bg_color_end:
+        svg_bytes = apply_svg_gradient(svg_bytes, bg_color, bg_color_end)
     return Response(content=svg_bytes, media_type="image/svg+xml")
 
 
@@ -1636,9 +1917,13 @@ async def preview_svg(slug: str, request: Request, host_override: Optional[str] 
 
     payload = IN_MEMORY_DB[clean_slug]
     design_data = payload.get("design", {})
+    bg_color = design_data.get("background", "#FFFFFF")
+    bg_type = design_data.get("background_type", "solid")
+    bg_color_end = design_data.get("background_color_end")
+
     design = QRDesign(
         foreground=design_data.get("foreground", "#0F172A"),
-        background="#FFFFFF",
+        background=bg_color,
         module_style=design_data.get("module_style", "rounded"),
         finder_style=design_data.get("finder_style", "rounded"),
         frame_text=design_data.get("frame_text", "ESCANEIE AQUI"),
@@ -1648,7 +1933,11 @@ async def preview_svg(slug: str, request: Request, host_override: Optional[str] 
         svg_bytes = render(f"http://{active_host}/{clean_slug}", design=design, fmt="svg", size_px=400)
     except InvalidDesign:
         design.foreground = "#0F172A"
+        design.background = "#FFFFFF"
         svg_bytes = render(f"http://{active_host}/{clean_slug}", design=design, fmt="svg", size_px=400)
+
+    if bg_type == "gradient" and bg_color_end:
+        svg_bytes = apply_svg_gradient(svg_bytes, bg_color, bg_color_end)
 
     return Response(content=svg_bytes, media_type="image/svg+xml")
 
@@ -1707,9 +1996,13 @@ async def export_qr(
 
     payload = IN_MEMORY_DB[clean_slug]
     design_data = payload.get("design", {})
+    bg_color = design_data.get("background", "#FFFFFF")
+    bg_type = design_data.get("background_type", "solid")
+    bg_color_end = design_data.get("background_color_end")
+
     design = QRDesign(
         foreground=design_data.get("foreground", "#0F172A"),
-        background="#FFFFFF",
+        background=bg_color,
         module_style=design_data.get("module_style", "rounded"),
         finder_style=design_data.get("finder_style", "rounded"),
         frame_text=design_data.get("frame_text", "ESCANEIE AQUI"),
@@ -1719,10 +2012,14 @@ async def export_qr(
         content = render(f"http://{active_host}/{clean_slug}", design=design, fmt=format, size_px=size)
     except InvalidDesign:
         design.foreground = "#0F172A"
+        design.background = "#FFFFFF"
         content = render(f"http://{active_host}/{clean_slug}", design=design, fmt=format, size_px=size)
     except Exception as exc:
         log.error("Erro ao exportar QR code /%s (%s): %r", clean_slug, format, exc)
         raise HTTPException(status_code=500, detail="Erro interno ao gerar arquivo de exportação")
+
+    if format == "svg" and bg_type == "gradient" and bg_color_end:
+        content = apply_svg_gradient(content, bg_color, bg_color_end)
 
     media_types = {"svg": "image/svg+xml", "png": "image/png", "pdf": "application/pdf"}
     return Response(
