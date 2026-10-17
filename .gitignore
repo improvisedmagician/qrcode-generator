@@ -29,4 +29,5 @@ Thumbs.db
 build/
 dist/
 *.spec
+*.exe
 .pytest_local_db.json
