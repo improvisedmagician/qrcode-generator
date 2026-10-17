@@ -77,6 +77,9 @@ else:
     redis_sync = fakeredis.FakeRedis(server=fake_server, decode_responses=True)
     redis_async = fakeredis.FakeAsyncRedis(server=fake_server, decode_responses=True)
 
+# Registro de exclusões (tombstones) para impedir ressurgimento de slugs deletados
+DELETED_SLUGS: set[str] = set()
+
 # Banco de dados simulado em memória com histórico
 IN_MEMORY_DB: dict[str, dict] = {
     "promo": {
@@ -181,8 +184,23 @@ IN_MEMORY_DB: dict[str, dict] = {
 # Sincroniza em Redis sob múltiplos hostnames para tolerância total
 KNOWN_HOSTS = ["localhost", "127.0.0.1", "0.0.0.0", LAN_IP]
 
+# Recupera túmulos de exclusão salvos no Redis para persistência inter-instâncias
+if redis_sync:
+    try:
+        saved_deletions = redis_sync.smembers("deleted_qr_slugs")
+        if saved_deletions:
+            DELETED_SLUGS.update(saved_deletions)
+    except Exception as exc:
+        log.warning("Falha ao ler deleted_qr_slugs do Redis: %r", exc)
+
+# Remove imediatamente da memória quaisquer slugs que já foram deletados
+for d in list(DELETED_SLUGS):
+    IN_MEMORY_DB.pop(d, None)
+
 def sync_redis_slug(slug: str, payload: dict):
     clean = slug.strip().lstrip("/").lower()
+    if clean in DELETED_SLUGS:
+        return
     payload_str = json.dumps(payload)
     if redis_sync:
         try:
@@ -193,8 +211,9 @@ def sync_redis_slug(slug: str, payload: dict):
         except Exception as exc:
             log.warning("Falha ao sincronizar slug %s no Redis: %r", clean, exc)
 
-for slug, payload in IN_MEMORY_DB.items():
-    sync_redis_slug(slug, payload)
+for slug, payload in list(IN_MEMORY_DB.items()):
+    if slug not in DELETED_SLUGS:
+        sync_redis_slug(slug, payload)
 
 CAPTURED_SCANS: list[dict] = []
 
@@ -227,6 +246,16 @@ async def simulate_analytics_worker():
 # Resolver resiliente: se falhar no Redis, consulta o banco em memória local ou Redis externo
 async def fake_pg_fetch(hostname: str, slug: str):
     clean_slug = slug.strip().lstrip("/").lower()
+    if clean_slug in DELETED_SLUGS:
+        return None
+    if REDIS_URL:
+        try:
+            if await redis_async.sismember("deleted_qr_slugs", clean_slug):
+                DELETED_SLUGS.add(clean_slug)
+                return None
+        except Exception:
+            pass
+
     item = IN_MEMORY_DB.get(clean_slug)
     if item is None and REDIS_URL:
         try:
@@ -271,7 +300,17 @@ async def lifespan(app: FastAPI):
         await pipeline.stop()
 
 
+from fastapi.middleware.cors import CORSMiddleware
+
 app = FastAPI(title="QR Dinâmico — Enterprise SaaS", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 class QRCreateDTO(BaseModel):
@@ -626,6 +665,34 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     let todosQRs = [];
     let filtroAtualStatus = 'all';
 
+    function getDeletedSlugs() {
+      try {
+        return JSON.parse(localStorage.getItem('deleted_qr_slugs') || '[]');
+      } catch (e) {
+        return [];
+      }
+    }
+
+    function addDeletedSlug(slug) {
+      try {
+        const list = getDeletedSlugs();
+        const clean = slug.toLowerCase().trim();
+        if (!list.includes(clean)) {
+          list.push(clean);
+          localStorage.setItem('deleted_qr_slugs', JSON.stringify(list));
+        }
+      } catch (e) {}
+    }
+
+    function removeDeletedSlug(slug) {
+      try {
+        const list = getDeletedSlugs();
+        const clean = slug.toLowerCase().trim();
+        const filtered = list.filter(s => s !== clean);
+        localStorage.setItem('deleted_qr_slugs', JSON.stringify(filtered));
+      } catch (e) {}
+    }
+
     function escapeHtml(str) {
       if (str === null || str === undefined) return '';
       return String(str)
@@ -705,8 +772,13 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
           fetch(`/api/qrcodes?host_override=${encodeURIComponent(activeHost)}`),
           fetch('/scans')
         ]);
-        todosQRs = await resQRs.json();
+        const serverQRs = await resQRs.json();
         const scansData = await resScans.json();
+
+        const deletedSlugs = getDeletedSlugs();
+        todosQRs = (Array.isArray(serverQRs) ? serverQRs : []).filter(
+          qr => !deletedSlugs.includes(String(qr.slug).toLowerCase().trim())
+        );
 
         // Atualiza KPIs
         document.getElementById('kpi-total').innerText = scansData.total_scans;
@@ -1073,6 +1145,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 
       if (modo === 'criar') {
         payload.slug = slug;
+        removeDeletedSlug(slug);
         const res = await fetch('/api/qrcodes', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1089,7 +1162,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       } else {
         payload.status = document.getElementById('input-status').value;
         const originalSlug = document.getElementById('qr-slug-original').value;
-        const res = await fetch(`/api/qrcodes/${originalSlug}`, {
+        const res = await fetch(`/api/qrcodes/${encodeURIComponent(originalSlug)}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
@@ -1107,13 +1180,31 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 
     async function deletarQRCode(slug, nome) {
       if (confirm(`Tem certeza que deseja excluir o QR Code "${nome}" (/${slug})?\n\nO link deixará de redirecionar imediatamente.`)) {
-        const res = await fetch(`/api/qrcodes/${slug}`, { method: 'DELETE' });
-        if (res.ok) {
-          showToast(`QR Code /${slug} excluído.`, 'fa-trash-can text-rose-400');
-          carregarDashboard();
-        } else {
-          alert("Não foi possível excluir o código.");
+        addDeletedSlug(slug);
+        todosQRs = todosQRs.filter(q => String(q.slug).toLowerCase().trim() !== String(slug).toLowerCase().trim());
+        filtrarQRs();
+
+        try {
+          const res = await fetch(`/api/qrcodes/${encodeURIComponent(slug)}`, {
+            method: 'DELETE',
+            headers: { 'Accept': 'application/json' }
+          });
+          if (res.ok) {
+            showToast(`QR Code /${slug} excluído com sucesso!`, 'fa-trash-can text-rose-400');
+          } else {
+            let errorMsg = 'Status ' + res.status;
+            try {
+              const err = await res.json();
+              if (err && err.detail) errorMsg = err.detail;
+            } catch (_) {}
+            console.warn("Aviso na exclusão do servidor:", errorMsg);
+            showToast(`QR Code /${slug} removido localmente.`, 'fa-trash-can text-amber-500');
+          }
+        } catch (err) {
+          console.warn("Erro de rede ao excluir:", err);
+          showToast(`QR Code /${slug} removido localmente.`, 'fa-trash-can text-amber-500');
         }
+        await carregarDashboard();
       }
     }
 
@@ -1151,8 +1242,13 @@ async def list_qrcodes_api(
 ):
     if REDIS_URL:
         try:
+            stored_deletions = await redis_async.smembers("deleted_qr_slugs")
+            if stored_deletions:
+                DELETED_SLUGS.update(stored_deletions)
             stored_slugs = await redis_async.smembers("all_qr_slugs")
             for s in stored_slugs:
+                if s in DELETED_SLUGS:
+                    continue
                 if s not in IN_MEMORY_DB:
                     meta = await redis_async.get(f"qr_meta:{s}")
                     if meta:
@@ -1163,6 +1259,9 @@ async def list_qrcodes_api(
     active_host = host_override or request.headers.get("host", "localhost")
     result = []
     for slug, payload in IN_MEMORY_DB.items():
+        clean_slug = slug.strip().lstrip("/").lower()
+        if clean_slug in DELETED_SLUGS:
+            continue
         if status and status != "all" and payload["status"] != status:
             continue
         if search:
@@ -1188,11 +1287,18 @@ async def list_qrcodes_api(
 @app.get("/api/qrcodes/{slug}")
 async def get_qrcode_api(slug: str, request: Request, host_override: Optional[str] = None):
     clean_slug = slug.strip().lstrip("/").lower()
-    if clean_slug not in IN_MEMORY_DB and REDIS_URL:
+    if clean_slug in DELETED_SLUGS:
+        raise HTTPException(status_code=404, detail="QR Code não encontrado")
+    if REDIS_URL:
         try:
+            if await redis_async.sismember("deleted_qr_slugs", clean_slug):
+                DELETED_SLUGS.add(clean_slug)
+                raise HTTPException(status_code=404, detail="QR Code não encontrado")
             meta = await redis_async.get(f"qr_meta:{clean_slug}")
             if meta:
                 IN_MEMORY_DB[clean_slug] = json.loads(meta)
+        except HTTPException:
+            raise
         except Exception:
             pass
 
@@ -1215,6 +1321,14 @@ async def get_qrcode_api(slug: str, request: Request, host_override: Optional[st
 @app.post("/api/qrcodes")
 async def create_qr_api(body: QRCreateDTO, request: Request):
     clean_slug = body.slug.strip().lstrip("/").lower()
+    # Se o slug havia sido deletado anteriormente, remove do tombstone
+    DELETED_SLUGS.discard(clean_slug)
+    if REDIS_URL:
+        try:
+            await redis_async.srem("deleted_qr_slugs", clean_slug)
+        except Exception:
+            pass
+
     if clean_slug in IN_MEMORY_DB:
         raise HTTPException(status_code=409, detail="Slug já está em uso. Escolha outro identificador.")
     if REDIS_URL:
@@ -1288,11 +1402,19 @@ async def create_qr_api(body: QRCreateDTO, request: Request):
 @app.put("/api/qrcodes/{slug}")
 async def update_qr_api(slug: str, body: QRUpdateDTO, request: Request):
     clean_slug = slug.strip().lstrip("/").lower()
+    if clean_slug in DELETED_SLUGS:
+        raise HTTPException(status_code=404, detail="QR Code não encontrado")
+
     if clean_slug not in IN_MEMORY_DB and REDIS_URL:
         try:
+            if await redis_async.sismember("deleted_qr_slugs", clean_slug):
+                DELETED_SLUGS.add(clean_slug)
+                raise HTTPException(status_code=404, detail="QR Code não encontrado")
             cached = await redis_async.get(f"qr_meta:{clean_slug}")
             if cached:
                 IN_MEMORY_DB[clean_slug] = json.loads(cached)
+        except HTTPException:
+            raise
         except Exception:
             pass
 
@@ -1359,30 +1481,25 @@ async def update_qr_api(slug: str, body: QRUpdateDTO, request: Request):
 @app.delete("/api/qrcodes/{slug}")
 async def delete_qr_api(slug: str, request: Request):
     clean_slug = slug.strip().lstrip("/").lower()
-    if clean_slug not in IN_MEMORY_DB and REDIS_URL:
-        try:
-            cached = await redis_async.get(f"qr_meta:{clean_slug}")
-            if cached:
-                IN_MEMORY_DB[clean_slug] = json.loads(cached)
-        except Exception:
-            pass
+    # Registra tombstone imediatamente e remove do estado em memória
+    DELETED_SLUGS.add(clean_slug)
+    IN_MEMORY_DB.pop(clean_slug, None)
 
-    if clean_slug not in IN_MEMORY_DB:
-        raise HTTPException(status_code=404, detail="QR Code não encontrado")
-
-    del IN_MEMORY_DB[clean_slug]
     current_host = request.headers.get("host", "").split(":")[0].lower()
     hosts_to_sync = set(KNOWN_HOSTS + [current_host])
     try:
-        for h in hosts_to_sync:
-            if h:
-                await redis_async.delete(f"qr:{h}:{clean_slug}")
-                resolver.invalidate(f"qr:{h}:{clean_slug}")
-        await redis_async.srem("all_qr_slugs", clean_slug)
-        await redis_async.delete(f"qr_meta:{clean_slug}")
+        if redis_async:
+            await redis_async.sadd("deleted_qr_slugs", clean_slug)
+            await redis_async.srem("all_qr_slugs", clean_slug)
+            await redis_async.delete(f"qr_meta:{clean_slug}")
+            for h in hosts_to_sync:
+                if h:
+                    await redis_async.delete(f"qr:{h}:{clean_slug}")
+                    resolver.invalidate(f"qr:{h}:{clean_slug}")
     except Exception as exc:
-        log.warning("Sincronização Redis offline ou ignorada: %r", exc)
+        log.warning("Sincronização Redis offline ou ignorada durante exclusão: %r", exc)
 
+    # Operação 100% idempotente (RFC 7231 / 9110)
     return {"status": "deleted", "slug": clean_slug}
 
 
@@ -1414,6 +1531,8 @@ def live_preview(
 @app.get("/preview/{slug}.svg")
 async def preview_svg(slug: str, request: Request, host_override: Optional[str] = None):
     clean_slug = slug.strip().lstrip("/").lower()
+    if clean_slug in DELETED_SLUGS:
+        raise HTTPException(status_code=404, detail="Slug não encontrado")
     if clean_slug not in IN_MEMORY_DB and REDIS_URL:
         try:
             meta = await redis_async.get(f"qr_meta:{clean_slug}")
@@ -1473,6 +1592,8 @@ async def export_qr(
     host_override: Optional[str] = None,
 ):
     clean_slug = slug.strip().lstrip("/").lower()
+    if clean_slug in DELETED_SLUGS:
+        raise HTTPException(status_code=404, detail="Slug não encontrado")
     if clean_slug not in IN_MEMORY_DB and REDIS_URL:
         try:
             meta = await redis_async.get(f"qr_meta:{clean_slug}")
@@ -1520,28 +1641,28 @@ SLUG_VALID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,100}$")
 @app.get("/{slug}")
 async def redirect_endpoint(slug: str, request: Request):
     clean_slug = slug.strip().lstrip("/").lower()
-    if not SLUG_VALID_RE.fullmatch(clean_slug):
-        return PlainTextResponse("Not found", status_code=404)
-
     host = request.headers.get("host", "").split(":")[0].lower()
-    payload = await resolver.resolve(host, clean_slug)
-    
-    # Fallback garantido para ambiente standalone / serverless
-    if payload is None:
-        payload = IN_MEMORY_DB.get(clean_slug)
-        if payload is None and REDIS_URL:
-            try:
-                meta = await redis_async.get(f"qr_meta:{clean_slug}")
-                if meta:
-                    payload = json.loads(meta)
-                    IN_MEMORY_DB[clean_slug] = payload
-            except Exception:
-                pass
+    if not SLUG_VALID_RE.fullmatch(clean_slug) or clean_slug in DELETED_SLUGS:
+        payload = None
+    else:
+        payload = await resolver.resolve(host, clean_slug)
+        
+        # Fallback garantido para ambiente standalone / serverless
         if payload is None:
-            for k, v in IN_MEMORY_DB.items():
-                if k.lower() == clean_slug:
-                    payload = v
-                    break
+            payload = IN_MEMORY_DB.get(clean_slug)
+            if payload is None and REDIS_URL:
+                try:
+                    meta = await redis_async.get(f"qr_meta:{clean_slug}")
+                    if meta:
+                        payload = json.loads(meta)
+                        IN_MEMORY_DB[clean_slug] = payload
+                except Exception:
+                    pass
+            if payload is None:
+                for k, v in IN_MEMORY_DB.items():
+                    if k.lower() == clean_slug:
+                        payload = v
+                        break
 
     headers = request.headers
     if payload is None:

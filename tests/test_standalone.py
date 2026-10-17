@@ -221,3 +221,64 @@ def test_serverless_scan_enrichment(monkeypatch, client):
     assert last_scan["os"] == "iOS"
 
 
+def test_idempotent_delete_and_tombstone(client):
+    # 1. Cria um QR code temporário
+    test_slug = "slug-teste-idempotente"
+    create_dto = {
+        "name": "QR Idempotente",
+        "slug": test_slug,
+        "target_url": "https://meusite.com.br/teste-idempotente",
+    }
+    resp = client.post("/api/qrcodes", json=create_dto)
+    assert resp.status_code == 200
+
+    # 2. Primeira exclusão: retorna 200
+    del_1 = client.delete(f"/api/qrcodes/{test_slug}")
+    assert del_1.status_code == 200
+    assert del_1.json()["status"] == "deleted"
+
+    # 3. Segunda exclusão (idempotente): deve retornar 200 sem falha
+    del_2 = client.delete(f"/api/qrcodes/{test_slug}")
+    assert del_2.status_code == 200
+    assert del_2.json()["status"] == "deleted"
+
+    # 4. Excluir slug que nunca existiu: também retorna 200 (idempotente por especificação HTTP RFC)
+    del_unknown = client.delete("/api/qrcodes/slug-totalmente-inexistente-xyz")
+    assert del_unknown.status_code == 200
+    assert del_unknown.json()["status"] == "deleted"
+
+    # 5. O slug excluído não deve aparecer na listagem
+    list_resp = client.get("/api/qrcodes")
+    assert list_resp.status_code == 200
+    all_slugs = [q["slug"] for q in list_resp.json()]
+    assert test_slug not in all_slugs
+
+    # 6. Consultar slug excluído retorna 404
+    get_resp = client.get(f"/api/qrcodes/{test_slug}")
+    assert get_resp.status_code == 404
+
+    # 7. Redirecionar slug excluído retorna 404
+    redir_resp = client.get(f"/{test_slug}", follow_redirects=False)
+    assert redir_resp.status_code == 404
+
+    # 8. Recriação do mesmo slug após exclusão deve ser permitida com sucesso
+    recreate_resp = client.post("/api/qrcodes", json=create_dto)
+    assert recreate_resp.status_code == 200
+    assert recreate_resp.json()["status"] == "created"
+
+
+def test_cors_options_preflight(client):
+    test_origin = "https://meu-dominio-preview.vercel.app"
+    resp = client.options(
+        "/api/qrcodes/promo",
+        headers={
+            "Origin": test_origin,
+            "Access-Control-Request-Method": "DELETE",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.headers.get("access-control-allow-origin") == test_origin
+
+
+
+
