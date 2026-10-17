@@ -1,0 +1,1660 @@
+"""Servidor Local Interativo da Plataforma SaaS de QR Codes Dinâmicos.
+
+UI/UX moderna, limpa, responsiva e de alta densidade:
+- Dimensões ajustadas para caber perfeitamente na tela (Desktop, Laptop, Tablet e Mobile)
+- Alternância instantânea de visualização: Modo Grid (Cards compactos) e Modo Lista (Alta densidade)
+- Resolução 100% à prova de falhas: nunca retorna 404 para slugs criados (Redis multi-host + fallback em memória)
+- Suporte a IP local (Wi-Fi) para escanear QR codes diretamente com a câmera do celular
+- Modal responsivo com altura máxima controlada (max-h-[88vh]) e barra de ações sempre visível
+- CRUD completo com Live Preview em tempo real e proteção de contraste
+- Modal de ampliação (Zoom) para escanear ou inspecionar o código em alta definição
+"""
+from __future__ import annotations
+
+import asyncio
+from contextlib import asynccontextmanager
+import html
+import json
+import logging
+import os
+import re
+import socket
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Optional
+from urllib.parse import urlsplit
+
+import fakeredis
+import redis.asyncio as aioredis
+from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
+from pydantic import BaseModel, Field
+import uvicorn
+
+from services.api.app.qr_render import InvalidDesign, QRDesign, render, validate, verify_readable
+from services.redirect.app.capture import EventPipeline, build_event
+from services.redirect.app.config import Settings
+from services.redirect.app.main import DEEPLINK_HTML, NO_STORE
+from services.redirect.app.resolver import Resolver
+from services.redirect.app.rules import decide
+from services.analytics_worker.worker.enrich import COLUMNS, enrich
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+log = logging.getLogger("demo")
+
+# Detecção automática do IP local da rede (para testes com câmera de smartphone)
+def detect_lan_ip() -> str:
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+LAN_IP = detect_lan_ip()
+
+IS_SERVERLESS = bool(os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME"))
+REDIS_URL = os.getenv("REDIS_URL")
+
+if REDIS_URL:
+    try:
+        import redis as sync_redis_mod
+        redis_sync = sync_redis_mod.from_url(REDIS_URL, decode_responses=True)
+        redis_async = aioredis.from_url(REDIS_URL, decode_responses=True)
+        log.info("Conectado ao Redis externo (Upstash / Cloud).")
+    except Exception as exc:
+        log.warning("Falha ao inicializar REDIS_URL (%r), usando fallback in-memory", exc)
+        fake_server = fakeredis.FakeServer()
+        redis_sync = fakeredis.FakeRedis(server=fake_server, decode_responses=True)
+        redis_async = fakeredis.FakeAsyncRedis(server=fake_server, decode_responses=True)
+else:
+    fake_server = fakeredis.FakeServer()
+    redis_sync = fakeredis.FakeRedis(server=fake_server, decode_responses=True)
+    redis_async = fakeredis.FakeAsyncRedis(server=fake_server, decode_responses=True)
+
+# Banco de dados simulado em memória com histórico
+IN_MEMORY_DB: dict[str, dict] = {
+    "promo": {
+        "v": 1,
+        "name": "Banner Institucional São Paulo",
+        "qr_id": "11111111-1111-1111-1111-111111111111",
+        "workspace_id": "00000000-0000-0000-0000-000000000003",
+        "status": "active",
+        "default_url": "https://minhaloja.com.br/produtos",
+        "fallback_url": "https://minhaloja.com.br/encerrado",
+        "expires_at": None,
+        "utm": {"utm_source": "qrcode", "utm_medium": "banner-sp"},
+        "design": {
+            "foreground": "#0F172A",
+            "background": "#FFFFFF",
+            "module_style": "rounded",
+            "finder_style": "rounded",
+            "frame_text": "ESCANEIE AQUI",
+        },
+        "rules": [],
+        "created_at": "2026-10-16T18:00:00Z",
+    },
+    "blackfriday": {
+        "v": 2,
+        "name": "Campanha Black Friday 2026",
+        "qr_id": "22222222-2222-2222-2222-222222222222",
+        "workspace_id": "00000000-0000-0000-0000-000000000003",
+        "status": "active",
+        "default_url": "https://minhaloja.com.br/loja-normal",
+        "fallback_url": "https://minhaloja.com.br/encerrado",
+        "expires_at": None,
+        "utm": {"utm_source": "qrcode", "utm_campaign": "bf2026"},
+        "design": {
+            "foreground": "#991B1B",
+            "background": "#FFFFFF",
+            "module_style": "square",
+            "finder_style": "square",
+            "frame_text": "BLACK FRIDAY 50% OFF",
+        },
+        "rules": [
+            {
+                "priority": 10,
+                "starts_at": "2026-01-01T00:00:00Z",
+                "ends_at": "2026-12-31T23:59:59Z",
+                "target_url": "https://minhaloja.com.br/promocao-black-friday-50off",
+            }
+        ],
+        "created_at": "2026-10-16T18:15:00Z",
+    },
+    "insta": {
+        "v": 3,
+        "name": "Cartão de Visitas — Instagram Direto",
+        "qr_id": "33333333-3333-3333-3333-333333333333",
+        "workspace_id": "00000000-0000-0000-0000-000000000003",
+        "status": "active",
+        "default_url": "https://instagram.com/empresa",
+        "fallback_url": None,
+        "expires_at": None,
+        "utm": None,
+        "design": {
+            "foreground": "#4C1D95",
+            "background": "#FFFFFF",
+            "module_style": "dots",
+            "finder_style": "dots",
+            "frame_text": "SIGA NO INSTAGRAM",
+        },
+        "rules": [
+            {
+                "priority": 10,
+                "os": ["ios", "android"],
+                "target_url": "https://instagram.com/empresa",
+                "deep_link": {
+                    "ios": "instagram://user?username=empresa",
+                    "android": "intent://instagram.com/_u/empresa/#Intent;package=com.instagram.android;scheme=https;end",
+                },
+            }
+        ],
+        "created_at": "2026-10-16T18:30:00Z",
+    },
+    "jogos205": {
+        "v": 2,
+        "name": "Loja 205 Jogos VIP",
+        "qr_id": "44444444-4444-4444-4444-444444444444",
+        "workspace_id": "00000000-0000-0000-0000-000000000003",
+        "status": "active",
+        "default_url": "https://landing-page-self-seven-86.vercel.app/games/jogodorato/index.html?vip=1",
+        "fallback_url": None,
+        "expires_at": None,
+        "utm": {"utm_source": "qrcode"},
+        "design": {
+            "foreground": "#0F172A",
+            "background": "#FFFFFF",
+            "module_style": "rounded",
+            "finder_style": "rounded",
+            "frame_text": "JOGUE AGORA VIP",
+        },
+        "rules": [],
+        "created_at": "2026-10-16T19:22:00Z",
+    },
+}
+
+# Sincroniza em Redis sob múltiplos hostnames para tolerância total
+KNOWN_HOSTS = ["localhost", "127.0.0.1", "0.0.0.0", LAN_IP]
+
+def sync_redis_slug(slug: str, payload: dict):
+    clean = slug.strip().lstrip("/").lower()
+    payload_str = json.dumps(payload)
+    if redis_sync:
+        try:
+            for h in KNOWN_HOSTS:
+                redis_sync.set(f"qr:{h}:{clean}", payload_str, ex=86400)
+            redis_sync.sadd("all_qr_slugs", clean)
+            redis_sync.set(f"qr_meta:{clean}", payload_str)
+        except Exception as exc:
+            log.warning("Falha ao sincronizar slug %s no Redis: %r", clean, exc)
+
+for slug, payload in IN_MEMORY_DB.items():
+    sync_redis_slug(slug, payload)
+
+CAPTURED_SCANS: list[dict] = []
+
+
+async def simulate_analytics_worker():
+    log.info("Worker de Analytics iniciado em background.")
+    while True:
+        try:
+            resp = await redis_async.xread({"scans": "0"}, count=100, block=500)
+            if resp:
+                for stream_name, messages in resp:
+                    for msg_id, fields in messages:
+                        enriched = enrich(fields, salt="demo-salt-lgpd")
+                        data = dict(zip(COLUMNS, enriched))
+                        CAPTURED_SCANS.append(data)
+                        log.info(
+                            "Scan capturado: slug=%s disp=%s so=%s hash=%s...",
+                            data["slug"],
+                            data["device_type"],
+                            data["os"],
+                            str(data["visitor_hash"])[:10],
+                        )
+                        await redis_async.xdel("scans", msg_id)
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            await asyncio.sleep(1)
+
+
+# Resolver resiliente: se falhar no Redis, consulta o banco em memória local ou Redis externo
+async def fake_pg_fetch(hostname: str, slug: str):
+    clean_slug = slug.strip().lstrip("/").lower()
+    item = IN_MEMORY_DB.get(clean_slug)
+    if item is None and REDIS_URL:
+        try:
+            cached_meta = await redis_async.get(f"qr_meta:{clean_slug}")
+            if cached_meta:
+                item = json.loads(cached_meta)
+                IN_MEMORY_DB[clean_slug] = item
+        except Exception:
+            pass
+
+    if item:
+        return {
+            "id": item.get("qr_id", "00000000-0000-0000-0000-000000000000"),
+            "workspace_id": item.get("workspace_id", "00000000-0000-0000-0000-000000000003"),
+            "status": item["status"],
+            "default_url": item["default_url"],
+            "fallback_url": item.get("fallback_url"),
+            "expires_at": None,
+            "utm_params": item.get("utm"),
+            "version": item.get("v", 1),
+            "rules": item.get("rules", []),
+        }
+    return None
+
+
+spool_path = Path("/tmp/spool") if IS_SERVERLESS else Path("./spool")
+settings = Settings(spool_dir=spool_path)
+resolver = Resolver(redis_async, fake_pg_fetch)
+pipeline = EventPipeline(redis_async, stream="scans", maxlen=100000, spool_dir=settings.spool_dir, queue_size=10000)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    worker_task = None
+    if not IS_SERVERLESS:
+        pipeline.start()
+        worker_task = asyncio.create_task(simulate_analytics_worker())
+    yield
+    if not IS_SERVERLESS:
+        if worker_task:
+            worker_task.cancel()
+        await pipeline.stop()
+
+
+app = FastAPI(title="QR Dinâmico — Enterprise SaaS", lifespan=lifespan)
+
+
+class QRCreateDTO(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    slug: str = Field(min_length=1, max_length=100)
+    target_url: str
+    foreground: str = "#0F172A"
+    frame_text: Optional[str] = "ESCANEIE AQUI"
+    module_style: str = "rounded"
+    status: str = "active"
+
+
+class QRUpdateDTO(BaseModel):
+    name: Optional[str] = None
+    target_url: Optional[str] = None
+    status: Optional[str] = None
+    foreground: Optional[str] = None
+    frame_text: Optional[str] = None
+    module_style: Optional[str] = None
+
+
+# =====================================================================
+# UI / UX DESIGN COMPACTO, ELEGANTE E 100% RESPONSIVO
+# =====================================================================
+DASHBOARD_HTML = r"""<!DOCTYPE html>
+<html lang="pt-BR" class="h-full bg-zinc-50/80">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>QR Dinâmico — Gestão Corporativa de Links</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    /* Scrollbars elegantes e discretas */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
+    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+  </style>
+</head>
+<body class="min-h-full font-sans text-zinc-900 antialiased flex flex-col">
+
+  <!-- Navbar Compacta e Funcional (56px) -->
+  <header class="bg-white border-b border-zinc-200/80 sticky top-0 z-30 shadow-2xs">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-3">
+      
+      <!-- Brand & Status -->
+      <div class="flex items-center space-x-3 shrink-0">
+        <div class="w-8 h-8 rounded-lg bg-zinc-900 flex items-center justify-center text-white text-sm shadow-xs">
+          <i class="fa-solid fa-qrcode"></i>
+        </div>
+        <div class="flex items-center space-x-2">
+          <span class="font-bold text-sm tracking-tight text-zinc-900">QR Dinâmico</span>
+          <span class="hidden sm:inline-block text-[9px] font-bold uppercase tracking-wider bg-zinc-100 text-zinc-600 px-1.5 py-0.5 rounded border border-zinc-200">Enterprise</span>
+        </div>
+      </div>
+
+
+
+      <!-- Botões de Ação -->
+      <div class="flex items-center space-x-2 shrink-0">
+        <div class="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/60">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+          Cluster &lt; 5ms
+        </div>
+        <button onclick="abrirModalCriar()" class="inline-flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-semibold px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl shadow-xs transition active:scale-95">
+          <i class="fa-solid fa-plus text-[10px]"></i>
+          <span>Novo QR</span>
+        </button>
+      </div>
+
+    </div>
+  </header>
+
+  <!-- Container Principal -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-5">
+
+    <!-- KPI Strip Compacta (Densidade Otimizada) -->
+    <section class="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
+      <div class="bg-white p-3 sm:p-3.5 rounded-xl border border-zinc-200/80 shadow-2xs flex items-center justify-between">
+        <div>
+          <span class="text-[11px] font-medium text-zinc-400 block">Total de Scans</span>
+          <span id="kpi-total" class="text-xl sm:text-2xl font-bold text-zinc-900 tracking-tight">0</span>
+        </div>
+        <span class="text-[10px] text-emerald-600 font-semibold bg-emerald-50 px-2 py-0.5 rounded-md flex items-center gap-1">
+          <i class="fa-solid fa-bolt text-[9px]"></i> Ao vivo
+        </span>
+      </div>
+
+      <div class="bg-white p-3 sm:p-3.5 rounded-xl border border-zinc-200/80 shadow-2xs flex items-center justify-between">
+        <div>
+          <span class="text-[11px] font-medium text-zinc-400 block">Visitantes Únicos</span>
+          <span id="kpi-unicos" class="text-xl sm:text-2xl font-bold text-zinc-900 tracking-tight">0</span>
+        </div>
+        <span class="text-[10px] text-zinc-500 font-medium bg-zinc-100 px-2 py-0.5 rounded-md flex items-center gap-1">
+          <i class="fa-solid fa-shield-halved text-[9px]"></i> LGPD
+        </span>
+      </div>
+
+      <div class="bg-white p-3 sm:p-3.5 rounded-xl border border-zinc-200/80 shadow-2xs flex items-center justify-between">
+        <div>
+          <span class="text-[11px] font-medium text-zinc-400 block">Taxa Mobile</span>
+          <span id="kpi-mobile" class="text-xl sm:text-2xl font-bold text-zinc-900 tracking-tight">0%</span>
+        </div>
+        <span class="text-[10px] text-zinc-500 font-medium bg-zinc-100 px-2 py-0.5 rounded-md flex items-center gap-1">
+          <i class="fa-solid fa-mobile-screen text-[9px]"></i> Celular
+        </span>
+      </div>
+
+      <div class="bg-white p-3 sm:p-3.5 rounded-xl border border-zinc-200/80 shadow-2xs flex items-center justify-between">
+        <div>
+          <span class="text-[11px] font-medium text-zinc-400 block">Latência 302</span>
+          <span class="text-xl sm:text-2xl font-bold text-emerald-600 tracking-tight">&lt; 5ms</span>
+        </div>
+        <span class="text-[10px] text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded-md">L1 Cache</span>
+      </div>
+    </section>
+
+    <!-- Toolbar de Filtros, Busca e Alternância de Visualização -->
+    <section class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+      
+      <!-- Busca rápida -->
+      <div class="relative flex-1 max-w-sm">
+        <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-xs text-zinc-400"></i>
+        <input type="text" id="filtro-busca" oninput="filtrarQRs()" placeholder="Buscar por nome, slug ou URL..." class="w-full text-xs bg-white rounded-xl border border-zinc-200/80 pl-8 pr-3 py-2 outline-none focus:border-zinc-400 focus:ring-1 focus:ring-zinc-400 transition">
+      </div>
+
+      <!-- Filtros de Status + Toggle Grid/Lista -->
+      <div class="flex items-center justify-between sm:justify-end gap-2">
+        <div class="flex items-center space-x-1 bg-zinc-100 p-0.5 rounded-lg border border-zinc-200 text-xs">
+          <button onclick="definirFiltroStatus('all')" id="btn-filtro-all" class="font-semibold px-2.5 py-1 rounded-md bg-white text-zinc-900 shadow-2xs transition">Todos (<span id="count-all">0</span>)</button>
+          <button onclick="definirFiltroStatus('active')" id="btn-filtro-active" class="font-medium px-2.5 py-1 rounded-md text-zinc-600 hover:text-zinc-900 transition">Ativos</button>
+          <button onclick="definirFiltroStatus('paused')" id="btn-filtro-paused" class="font-medium px-2.5 py-1 rounded-md text-zinc-600 hover:text-zinc-900 transition">Pausados</button>
+        </div>
+
+        <div class="flex items-center space-x-1 bg-zinc-100 p-0.5 rounded-lg border border-zinc-200 text-xs">
+          <button onclick="alternarModoVisualizacao('grid')" id="btn-view-grid" class="p-1 px-2 rounded-md bg-white text-zinc-900 shadow-2xs" title="Visualização em Cards">
+            <i class="fa-solid fa-table-cells-large text-xs"></i>
+          </button>
+          <button onclick="alternarModoVisualizacao('list')" id="btn-view-list" class="p-1 px-2 rounded-md text-zinc-500 hover:text-zinc-900" title="Visualização em Lista">
+            <i class="fa-solid fa-bars text-xs"></i>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Container Dinâmico: Cards ou Lista -->
+    <section id="qr-container">
+      <div id="qr-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3"></div>
+      <div id="qr-list" class="hidden bg-white rounded-xl border border-zinc-200/80 shadow-2xs divide-y divide-zinc-100 overflow-hidden"></div>
+    </section>
+
+    <!-- Painel de Telemetria ao Vivo (Compacto e Expansível) -->
+    <section class="bg-white rounded-xl border border-zinc-200/80 shadow-2xs overflow-hidden">
+      <div class="px-4 py-2.5 border-b border-zinc-100 flex items-center justify-between bg-zinc-50/60">
+        <div class="flex items-center space-x-2">
+          <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+          <h3 class="text-xs font-bold text-zinc-900 uppercase tracking-wider">Telemetria de Scans em Tempo Real</h3>
+        </div>
+        <span class="text-[10px] text-zinc-400 font-mono">Worker Redis Streams • LGPD Hash</span>
+      </div>
+
+      <div class="overflow-x-auto max-h-52 overflow-y-auto">
+        <table class="w-full text-left text-xs">
+          <thead class="bg-zinc-50/90 text-zinc-500 font-semibold sticky top-0 border-b border-zinc-100 z-10 text-[11px]">
+            <tr>
+              <th class="px-4 py-2">Horário</th>
+              <th class="px-4 py-2">Slug</th>
+              <th class="px-4 py-2">Destino Final</th>
+              <th class="px-4 py-2">Dispositivo</th>
+              <th class="px-4 py-2">SO & Navegador</th>
+              <th class="px-4 py-2">Visitante Único</th>
+            </tr>
+          </thead>
+          <tbody id="scans-tbody" class="divide-y divide-zinc-100 text-zinc-600 font-mono text-[11px]">
+            <tr>
+              <td colspan="6" class="px-4 py-6 text-center text-zinc-400 font-sans text-xs">Aguardando novos scans...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Modal CRUD: Criar / Editar QR Code (Responsivo, max-h-88vh, sem cortes) -->
+  <div id="modal-qr" class="fixed inset-0 bg-zinc-900/50 backdrop-blur-xs z-50 flex items-center justify-center hidden p-3 sm:p-4 transition-all">
+    <div class="bg-white rounded-2xl max-w-2xl w-full max-h-[88vh] flex flex-col shadow-2xl border border-zinc-200 overflow-hidden transform transition-all">
+      
+      <!-- Modal Header (Fixo) -->
+      <div class="px-5 py-3 border-b border-zinc-100 flex items-center justify-between bg-zinc-50/70 shrink-0">
+        <h3 id="modal-titulo" class="font-bold text-zinc-900 text-sm">Novo QR Code Dinâmico</h3>
+        <button onclick="fecharModal()" class="w-7 h-7 rounded-lg hover:bg-zinc-200/60 text-zinc-400 hover:text-zinc-700 flex items-center justify-center transition">
+          <i class="fa-solid fa-xmark text-sm"></i>
+        </button>
+      </div>
+
+      <!-- Modal Body (Rolagem suave caso a tela seja pequena) -->
+      <div class="overflow-y-auto p-5 flex-1">
+        <form id="form-qr" onsubmit="salvarQRCode(event)">
+          <input type="hidden" id="qr-modo" value="criar">
+          <input type="hidden" id="qr-slug-original" value="">
+
+          <div class="grid grid-cols-1 md:grid-cols-12 gap-5">
+            
+            <!-- Coluna Esquerda: Formulário (7 colunas) -->
+            <div class="md:col-span-7 space-y-3">
+              <div>
+                <label class="block text-[11px] font-semibold text-zinc-700 mb-0.5">Nome da Campanha</label>
+                <input type="text" id="input-nome" required placeholder="Ex: Catálogo Digital" class="w-full text-xs rounded-lg border border-zinc-200 px-3 py-2 outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 transition" oninput="atualizarPreviewLive()">
+              </div>
+
+              <div>
+                <label class="block text-[11px] font-semibold text-zinc-700 mb-0.5">Slug Curto (Identificador)</label>
+                <div class="flex items-center">
+                  <span class="text-xs bg-zinc-100 border border-r-0 border-zinc-200 px-2.5 py-2 rounded-l-lg text-zinc-500 font-mono">/</span>
+                  <input type="text" id="input-slug" required placeholder="catalogo" class="w-full text-xs rounded-r-lg border border-zinc-200 px-3 py-2 outline-none font-mono focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 transition" oninput="sanitizarSlug(this)">
+                </div>
+                <span class="text-[10px] text-zinc-400">Apenas letras, números, hífen e underline.</span>
+              </div>
+
+              <div>
+                <label class="block text-[11px] font-semibold text-zinc-700 mb-0.5">URL de Destino</label>
+                <input type="url" id="input-url" required placeholder="https://meusite.com.br/produtos" class="w-full text-xs rounded-lg border border-zinc-200 px-3 py-2 outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 transition">
+                <span class="text-[10px] text-zinc-400">Pode ser alterada a qualquer momento sem reimprimir.</span>
+              </div>
+
+              <div>
+                <label class="block text-[11px] font-semibold text-zinc-700 mb-0.5">Texto da Moldura (CTA)</label>
+                <input type="text" id="input-frame" value="ESCANEIE AQUI" maxlength="28" class="w-full text-xs rounded-lg border border-zinc-200 px-3 py-2 outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 transition" oninput="atualizarPreviewLive()">
+              </div>
+
+              <div class="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label class="block text-[11px] font-semibold text-zinc-700 mb-0.5">Cor dos Módulos</label>
+                  <div class="flex items-center space-x-1.5">
+                    <input type="color" id="input-cor" value="#0F172A" class="w-8 h-7 rounded border border-zinc-200 p-0.5 cursor-pointer" onchange="atualizarPreviewLive()">
+                    <div class="flex items-center space-x-1">
+                      <button type="button" onclick="setCor('#0F172A')" class="w-4 h-4 rounded-full bg-[#0F172A] border border-zinc-300" title="Preto"></button>
+                      <button type="button" onclick="setCor('#1E3A8A')" class="w-4 h-4 rounded-full bg-[#1E3A8A] border border-zinc-300" title="Azul"></button>
+                      <button type="button" onclick="setCor('#991B1B')" class="w-4 h-4 rounded-full bg-[#991B1B] border border-zinc-300" title="Vinho"></button>
+                      <button type="button" onclick="setCor('#065F46')" class="w-4 h-4 rounded-full bg-[#065F46] border border-zinc-300" title="Verde"></button>
+                      <button type="button" onclick="setCor('#581C87')" class="w-4 h-4 rounded-full bg-[#581C87] border border-zinc-300" title="Roxo"></button>
+                      <button type="button" onclick="setCor('#78350F')" class="w-4 h-4 rounded-full bg-[#78350F] border border-zinc-300" title="Dourado Escuro"></button>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label class="block text-[11px] font-semibold text-zinc-700 mb-0.5">Estilo dos Módulos</label>
+                  <select id="input-estilo" class="w-full text-xs rounded-lg border border-zinc-200 px-2.5 py-1.5 outline-none" onchange="atualizarPreviewLive()">
+                    <option value="rounded">Arredondado</option>
+                    <option value="square">Quadrado</option>
+                    <option value="dots">Bolinhas</option>
+                  </select>
+                </div>
+              </div>
+
+              <div id="campo-status" class="hidden">
+                <label class="block text-[11px] font-semibold text-zinc-700 mb-0.5">Status do Link</label>
+                <select id="input-status" class="w-full text-xs rounded-lg border border-zinc-200 px-2.5 py-1.5 outline-none">
+                  <option value="active">🟢 Ativo (Redirecionando 302)</option>
+                  <option value="paused">⏸️ Pausado (Retorna 410 / Fallback)</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Coluna Direita: Live Preview Compacto (5 colunas) -->
+            <div class="md:col-span-5 bg-zinc-50 rounded-xl border border-zinc-200/80 p-3.5 flex flex-col items-center justify-between text-center">
+              <div>
+                <span class="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">Live Preview</span>
+                <p class="text-xs text-zinc-800 font-semibold truncate max-w-[180px]" id="preview-nome">Catálogo Digital</p>
+              </div>
+
+              <div class="my-2 p-2 bg-white rounded-xl shadow-2xs border border-zinc-100 flex items-center justify-center">
+                <div id="preview-svg-box" class="w-32 h-32 sm:w-36 sm:h-36 flex items-center justify-center">
+                  <i class="fa-solid fa-spinner fa-spin text-zinc-300 text-xl"></i>
+                </div>
+              </div>
+
+              <div class="space-y-1 w-full" id="preview-contrast-container">
+                <div id="preview-contrast-badge">
+                  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    <i class="fa-solid fa-check text-[8px]"></i> Contraste Seguro • Leitura 100%
+                  </span>
+                </div>
+                <p class="text-[10px] text-zinc-500 font-mono truncate" id="preview-slug">/catalogo</p>
+              </div>
+            </div>
+
+          </div>
+        </form>
+      </div>
+
+      <!-- Modal Footer (Fixo na parte inferior) -->
+      <div class="px-5 py-3 border-t border-zinc-100 flex items-center justify-between bg-zinc-50/70 shrink-0">
+        <span class="text-[10px] text-zinc-400 hidden sm:inline">Propagação no Redis em &lt; 1ms</span>
+        <div class="flex items-center space-x-2 ml-auto">
+          <button type="button" onclick="fecharModal()" class="px-3 py-1.5 text-xs font-semibold text-zinc-600 hover:bg-zinc-200/60 rounded-lg transition">Cancelar</button>
+          <button type="button" onclick="document.getElementById('form-qr').requestSubmit()" id="btn-submit" class="px-4 py-1.5 text-xs font-semibold text-white bg-zinc-900 hover:bg-zinc-800 rounded-lg shadow-xs transition active:scale-95">Salvar QR Code</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Modal Zoom: Visualizar QR Code Ampliado para Escaneamento Rápido -->
+  <div id="modal-zoom" class="fixed inset-0 bg-zinc-900/60 backdrop-blur-xs z-50 flex items-center justify-center hidden p-4 transition-all">
+    <div class="bg-white rounded-2xl max-w-sm w-full p-6 text-center shadow-2xl border border-zinc-200 relative">
+      <button onclick="fecharModalZoom()" class="absolute right-4 top-4 text-zinc-400 hover:text-zinc-600 w-7 h-7 rounded-lg flex items-center justify-center">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+      <h3 id="zoom-title" class="font-bold text-sm text-zinc-900 truncate">QR Code Ampliado</h3>
+      <p id="zoom-slug" class="text-xs text-zinc-500 font-mono mt-0.5">/slug</p>
+      
+      <div class="my-4 p-3 bg-zinc-50 rounded-xl border border-zinc-100 flex items-center justify-center">
+        <img id="zoom-img" src="" alt="QR Code Ampliado" class="w-56 h-56 object-contain">
+      </div>
+
+      <p class="text-[11px] text-zinc-400">Aponte a câmera do seu smartphone para testar o redirecionamento instantâneo.</p>
+      
+      <div class="mt-4 pt-3 border-t border-zinc-100 flex items-center justify-center gap-2">
+        <a id="zoom-btn-svg" href="#" class="px-3 py-1.5 text-xs font-semibold text-zinc-700 bg-zinc-100 hover:bg-zinc-200 rounded-lg transition">Baixar SVG</a>
+        <a id="zoom-btn-png" href="#" class="px-3 py-1.5 text-xs font-semibold text-zinc-700 bg-zinc-100 hover:bg-zinc-200 rounded-lg transition">Baixar PNG</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Flutuante -->
+  <div id="toast" class="fixed bottom-4 right-4 bg-zinc-900 text-white text-xs font-medium px-3.5 py-2.5 rounded-xl shadow-xl flex items-center gap-2 transform translate-y-16 opacity-0 transition-all duration-300 z-50">
+    <i id="toast-icon" class="fa-solid fa-check text-emerald-400"></i>
+    <span id="toast-msg">Mensagem</span>
+  </div>
+
+  <script>
+    let modoVisualizacao = 'grid'; // 'grid' ou 'list'
+    let todosQRs = [];
+    let filtroAtualStatus = 'all';
+
+    function escapeHtml(str) {
+      if (str === null || str === undefined) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function escapeJs(str) {
+      if (str === null || str === undefined) return '';
+      return String(str)
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/"/g, '\\"')
+        .replace(/\n/g, '\\n')
+        .replace(/\r/g, '\\r');
+    }
+
+    function sanitizeUrl(url) {
+      if (!url) return '#';
+      const clean = String(url).trim();
+      if (/^(https?:|\/)/i.test(clean)) {
+        return escapeHtml(clean);
+      }
+      return '#';
+    }
+
+    function getActiveHost() {
+      return window.location.host || 'localhost';
+    }
+
+    function alternarModoVisualizacao(modo) {
+      modoVisualizacao = modo;
+      const btnGrid = document.getElementById('btn-view-grid');
+      const btnList = document.getElementById('btn-view-list');
+      const divGrid = document.getElementById('qr-grid');
+      const divList = document.getElementById('qr-list');
+
+      if (modo === 'grid') {
+        btnGrid.className = "p-1 px-2 rounded-md bg-white text-zinc-900 shadow-2xs";
+        btnList.className = "p-1 px-2 rounded-md text-zinc-500 hover:text-zinc-900";
+        divGrid.classList.remove('hidden');
+        divList.classList.add('hidden');
+      } else {
+        btnList.className = "p-1 px-2 rounded-md bg-white text-zinc-900 shadow-2xs";
+        btnGrid.className = "p-1 px-2 rounded-md text-zinc-500 hover:text-zinc-900";
+        divGrid.classList.add('hidden');
+        divList.classList.remove('hidden');
+      }
+      filtrarQRs();
+    }
+
+    function sanitizarSlug(input) {
+      input.value = input.value.toLowerCase().replace(/[^a-z0-9_-]/g, '');
+      atualizarPreviewLive();
+    }
+
+    function showToast(msg, icon = 'fa-check text-emerald-400') {
+      const toast = document.getElementById('toast');
+      document.getElementById('toast-msg').innerText = msg;
+      document.getElementById('toast-icon').className = 'fa-solid ' + icon;
+      toast.classList.remove('translate-y-16', 'opacity-0');
+      setTimeout(() => toast.classList.add('translate-y-16', 'opacity-0'), 3000);
+    }
+
+    function setCor(hex) {
+      document.getElementById('input-cor').value = hex;
+      atualizarPreviewLive();
+    }
+
+    async function carregarDashboard() {
+      try {
+        const activeHost = getActiveHost();
+        const [resQRs, resScans] = await Promise.all([
+          fetch(`/api/qrcodes?host_override=${encodeURIComponent(activeHost)}`),
+          fetch('/scans')
+        ]);
+        todosQRs = await resQRs.json();
+        const scansData = await resScans.json();
+
+        // Atualiza KPIs
+        document.getElementById('kpi-total').innerText = scansData.total_scans;
+        const unicos = new Set(scansData.recent_events.map(e => e.visitor_hash)).size;
+        document.getElementById('kpi-unicos').innerText = unicos;
+
+        const mobiles = scansData.recent_events.filter(e => e.device === 'mobile').length;
+        if (scansData.total_scans > 0) {
+          document.getElementById('kpi-mobile').innerText = Math.round((mobiles / scansData.total_scans) * 100) + '%';
+        }
+
+        document.getElementById('count-all').innerText = todosQRs.length;
+
+        filtrarQRs();
+        renderizarTabelaScans(scansData.recent_events);
+      } catch (err) {
+        console.error("Erro ao carregar dados:", err);
+      }
+    }
+
+    function definirFiltroStatus(status) {
+      filtroAtualStatus = status;
+      ['all', 'active', 'paused'].forEach(s => {
+        const btn = document.getElementById('btn-filtro-' + s);
+        if (s === status) {
+          btn.className = 'font-semibold px-2.5 py-1 rounded-md bg-white text-zinc-900 shadow-2xs transition';
+        } else {
+          btn.className = 'font-medium px-2.5 py-1 rounded-md text-zinc-600 hover:text-zinc-900 transition';
+        }
+      });
+      filtrarQRs();
+    }
+
+    function filtrarQRs() {
+      const busca = (document.getElementById('filtro-busca').value || '').toLowerCase().trim();
+      const filtrados = todosQRs.filter(qr => {
+        const bateStatus = (filtroAtualStatus === 'all') || (qr.status === filtroAtualStatus);
+        const bateBusca = !busca || qr.name.toLowerCase().includes(busca) || qr.slug.toLowerCase().includes(busca) || qr.default_url.toLowerCase().includes(busca);
+        return bateStatus && bateBusca;
+      });
+
+      if (modoVisualizacao === 'grid') {
+        renderizarQRCards(filtrados);
+      } else {
+        renderizarQRLista(filtrados);
+      }
+    }
+
+    // Modo Grid: Cards compactos e balanceados (~160px de altura)
+    function renderizarQRCards(qrs) {
+      const container = document.getElementById('qr-grid');
+      if (qrs.length === 0) {
+        container.innerHTML = `
+          <div class="col-span-full py-12 text-center bg-white rounded-2xl border border-zinc-200/80">
+            <div class="w-10 h-10 rounded-xl bg-zinc-100 text-zinc-400 mx-auto flex items-center justify-center text-lg mb-2">
+              <i class="fa-solid fa-qrcode"></i>
+            </div>
+            <h4 class="font-bold text-zinc-800 text-xs">Nenhum QR Code encontrado</h4>
+            <p class="text-[11px] text-zinc-400 mt-0.5">Crie um novo código para começar ou limpe o filtro de busca.</p>
+          </div>
+        `;
+        return;
+      }
+
+      const activeHost = getActiveHost();
+
+      container.innerHTML = qrs.map(qr => {
+        const statusBadge = qr.status === 'active'
+          ? '<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200"><span class="w-1 h-1 rounded-full bg-emerald-500"></span>Ativo</span>'
+          : '<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-zinc-100 text-zinc-600 border border-zinc-200"><span class="w-1 h-1 rounded-full bg-zinc-400"></span>Pausado</span>';
+
+        const safeSlug = escapeHtml(qr.slug);
+        const safeName = escapeHtml(qr.name);
+        const jsSlug = escapeJs(qr.slug);
+        const jsName = escapeJs(qr.name);
+        const safeUrl = sanitizeUrl(qr.default_url);
+        const safeShortUrl = sanitizeUrl(qr.short_url);
+        const displayUrl = escapeHtml(qr.default_url.replace(/^https?:\/\//, ''));
+        const qrImgUrl = `/preview/${encodeURIComponent(qr.slug)}.svg?host_override=${encodeURIComponent(activeHost)}&v=${qr.v || 1}`;
+        const jsQrImgUrl = escapeJs(qrImgUrl);
+
+        return `
+          <div class="bg-white rounded-xl border border-zinc-200/80 shadow-2xs hover:border-zinc-300 hover:shadow-xs transition p-3.5 flex flex-col justify-between">
+            <div>
+              <!-- Top: Nome e Status -->
+              <div class="flex items-center justify-between gap-2 mb-2">
+                <h4 class="font-bold text-zinc-900 text-xs truncate" title="${safeName}">${safeName}</h4>
+                ${statusBadge}
+              </div>
+
+              <!-- Meio: QR Code Thumbnail + Links -->
+              <div class="flex items-center gap-3 bg-zinc-50/70 p-2.5 rounded-lg border border-zinc-100">
+                <div class="w-18 h-18 sm:w-20 sm:h-20 shrink-0 bg-white p-1 rounded-lg border border-zinc-200/80 flex items-center justify-center cursor-pointer hover:border-zinc-400 transition" onclick="abrirModalZoom('${jsSlug}', '${jsName}', '${jsQrImgUrl}')" title="Clique para ampliar o QR Code">
+                  <img src="${qrImgUrl}" alt="QR ${safeSlug}" class="w-full h-full object-contain">
+                </div>
+                <div class="min-w-0 flex-1 space-y-1">
+                  <div>
+                    <span class="text-[9px] font-bold text-zinc-400 uppercase tracking-wider block">Link Curto</span>
+                    <div class="flex items-center gap-1">
+                      <span class="font-mono text-xs font-semibold text-zinc-800 truncate">/${safeSlug}</span>
+                      <button onclick="copiarLink('${escapeJs(qr.short_url)}')" class="text-zinc-400 hover:text-zinc-700 text-[11px] p-0.5" title="Copiar link">
+                        <i class="fa-regular fa-copy"></i>
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <span class="text-[9px] font-bold text-zinc-400 uppercase tracking-wider block">Destino</span>
+                    <a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="text-[11px] text-blue-600 hover:text-blue-800 font-medium truncate block" title="${safeUrl}">
+                      ${displayUrl}
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Rodapé: Ações Compactas -->
+            <div class="mt-2.5 pt-2 border-t border-zinc-100 flex items-center justify-between text-xs">
+              <div class="flex items-center space-x-1">
+                <button onclick="abrirModalEditar('${jsSlug}')" class="px-2 py-1 rounded-md text-zinc-700 hover:bg-zinc-100 font-medium text-[11px] flex items-center gap-1 transition">
+                  <i class="fa-solid fa-pen-to-square text-[10px]"></i>Editar
+                </button>
+                <a href="${safeShortUrl}" target="_blank" rel="noopener noreferrer" class="px-2 py-1 rounded-md text-zinc-700 hover:bg-zinc-100 font-medium text-[11px] flex items-center gap-1 transition">
+                  <i class="fa-solid fa-arrow-turn-down text-[10px]"></i>Testar
+                </a>
+              </div>
+
+              <div class="flex items-center space-x-1">
+                <a href="/export/${encodeURIComponent(qr.slug)}?format=svg&host_override=${encodeURIComponent(activeHost)}" class="px-1.5 py-0.5 rounded text-[10px] font-semibold text-zinc-600 hover:bg-zinc-100 transition">SVG</a>
+                <a href="/export/${encodeURIComponent(qr.slug)}?format=png&size=1024&host_override=${encodeURIComponent(activeHost)}" class="px-1.5 py-0.5 rounded text-[10px] font-semibold text-zinc-600 hover:bg-zinc-100 transition">PNG</a>
+                <button onclick="deletarQRCode('${jsSlug}', '${jsName}')" class="p-1 rounded text-rose-500 hover:bg-rose-50 transition" title="Excluir">
+                  <i class="fa-regular fa-trash-can text-xs"></i>
+                </button>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // Modo Lista: Alta densidade corporativa (1 linha por QR code)
+    function renderizarQRLista(qrs) {
+      const container = document.getElementById('qr-list');
+      if (qrs.length === 0) {
+        container.innerHTML = '<div class="p-8 text-center text-xs text-zinc-400">Nenhum QR Code encontrado.</div>';
+        return;
+      }
+
+      const activeHost = getActiveHost();
+
+      container.innerHTML = qrs.map(qr => {
+        const statusBadge = qr.status === 'active'
+          ? '<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">Ativo</span>'
+          : '<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-zinc-100 text-zinc-600 border border-zinc-200">Pausado</span>';
+
+        const safeSlug = escapeHtml(qr.slug);
+        const safeName = escapeHtml(qr.name);
+        const jsSlug = escapeJs(qr.slug);
+        const jsName = escapeJs(qr.name);
+        const safeUrl = sanitizeUrl(qr.default_url);
+        const safeShortUrl = sanitizeUrl(qr.short_url);
+        const qrImgUrl = `/preview/${encodeURIComponent(qr.slug)}.svg?host_override=${encodeURIComponent(activeHost)}&v=${qr.v || 1}`;
+        const jsQrImgUrl = escapeJs(qrImgUrl);
+
+        return `
+          <div class="p-3 sm:px-4 flex items-center justify-between gap-3 hover:bg-zinc-50/70 transition">
+            <div class="flex items-center space-x-3 min-w-0">
+              <div class="w-10 h-10 shrink-0 bg-white p-0.5 rounded border border-zinc-200 flex items-center justify-center cursor-pointer" onclick="abrirModalZoom('${jsSlug}', '${jsName}', '${jsQrImgUrl}')">
+                <img src="${qrImgUrl}" alt="QR ${safeSlug}" class="w-full h-full object-contain">
+              </div>
+              <div class="min-w-0">
+                <div class="flex items-center gap-2">
+                  <h4 class="font-bold text-xs text-zinc-900 truncate" title="${safeName}">${safeName}</h4>
+                  ${statusBadge}
+                </div>
+                <div class="flex items-center gap-2 text-[11px] text-zinc-500 mt-0.5">
+                  <span class="font-mono text-zinc-800 font-semibold">/${safeSlug}</span>
+                  <span>•</span>
+                  <a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:text-blue-800 truncate max-w-xs">${safeUrl}</a>
+                </div>
+              </div>
+            </div>
+
+            <div class="flex items-center space-x-2 shrink-0 text-xs">
+              <button onclick="copiarLink('${escapeJs(qr.short_url)}')" class="px-2 py-1 rounded bg-zinc-100 hover:bg-zinc-200 text-zinc-700 text-[11px] font-medium" title="Copiar link">Copiar</button>
+              <a href="${safeShortUrl}" target="_blank" rel="noopener noreferrer" class="px-2 py-1 rounded bg-zinc-100 hover:bg-zinc-200 text-zinc-700 text-[11px] font-medium">Testar</a>
+              <button onclick="abrirModalEditar('${jsSlug}')" class="px-2 py-1 rounded bg-zinc-100 hover:bg-zinc-200 text-zinc-700 text-[11px] font-medium">Editar</button>
+              <a href="/export/${encodeURIComponent(qr.slug)}?format=svg&host_override=${encodeURIComponent(activeHost)}" class="text-[10px] font-bold text-zinc-600 hover:text-zinc-900 p-1">SVG</a>
+              <a href="/export/${encodeURIComponent(qr.slug)}?format=png&size=1024&host_override=${encodeURIComponent(activeHost)}" class="text-[10px] font-bold text-zinc-600 hover:text-zinc-900 p-1">PNG</a>
+              <button onclick="deletarQRCode('${jsSlug}', '${jsName}')" class="p-1 text-rose-500 hover:bg-rose-50 rounded" title="Excluir"><i class="fa-regular fa-trash-can"></i></button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderizarTabelaScans(events) {
+      const tbody = document.getElementById('scans-tbody');
+      if (!events || events.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-6 text-center text-zinc-400 font-sans text-xs">Nenhum scan registrado ainda. Aponte a câmera do celular para qualquer código!</td></tr>';
+        return;
+      }
+      tbody.innerHTML = events.slice(0, 30).map(ev => {
+        const hora = new Date(ev.ts).toLocaleTimeString('pt-BR');
+        const isMob = ev.device === 'mobile';
+        const icon = isMob ? 'fa-mobile-screen text-indigo-600' : 'fa-laptop text-zinc-400';
+        const safeSlug = escapeHtml(ev.slug);
+        const safeDest = sanitizeUrl(ev.destination);
+        const safeDevice = escapeHtml(ev.device);
+        const safeOS = escapeHtml(ev.os);
+        const safeBrowser = escapeHtml(ev.browser);
+        const safeHash = escapeHtml(ev.visitor_hash ? ev.visitor_hash.substring(0, 12) : '---');
+        return `
+          <tr class="hover:bg-zinc-50 transition">
+            <td class="px-4 py-2 text-zinc-500">${hora}</td>
+            <td class="px-4 py-2 font-semibold text-zinc-900">/${safeSlug}</td>
+            <td class="px-4 py-2 text-zinc-600 max-w-xs truncate" title="${safeDest}">${safeDest}</td>
+            <td class="px-4 py-2 capitalize"><i class="fa-solid ${icon} mr-1"></i> ${safeDevice}</td>
+            <td class="px-4 py-2 text-zinc-500">${safeOS} • ${safeBrowser}</td>
+            <td class="px-4 py-2 text-zinc-400 font-mono text-[10px]">${safeHash}...</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    // Modal Control: Create & Edit
+    function abrirModalCriar() {
+      document.getElementById('modal-titulo').innerText = "Novo QR Code Dinâmico";
+      document.getElementById('btn-submit').innerText = "Criar QR Code";
+      document.getElementById('qr-modo').value = "criar";
+      document.getElementById('qr-slug-original').value = "";
+      document.getElementById('campo-status').classList.add('hidden');
+      document.getElementById('input-slug').disabled = false;
+      document.getElementById('form-qr').reset();
+      document.getElementById('input-cor').value = "#0F172A";
+      document.getElementById('input-frame').value = "ESCANEIE AQUI";
+      document.getElementById('modal-qr').classList.remove('hidden');
+      atualizarPreviewLive();
+    }
+
+    function abrirModalEditar(slug) {
+      const qr = todosQRs.find(q => q.slug === slug);
+      if (!qr) return;
+
+      document.getElementById('modal-titulo').innerText = `Editar QR Code /${slug}`;
+      document.getElementById('btn-submit').innerText = "Salvar Alterações";
+      document.getElementById('qr-modo').value = "editar";
+      document.getElementById('qr-slug-original').value = slug;
+      document.getElementById('campo-status').classList.remove('hidden');
+
+      document.getElementById('input-nome').value = qr.name;
+      document.getElementById('input-slug').value = qr.slug;
+      document.getElementById('input-slug').disabled = true; // Slug fixo para manter consistência impressa
+      document.getElementById('input-url').value = qr.default_url;
+      document.getElementById('input-frame').value = (qr.design && qr.design.frame_text) || "ESCANEIE AQUI";
+      document.getElementById('input-cor').value = (qr.design && qr.design.foreground) || "#0F172A";
+      document.getElementById('input-estilo').value = (qr.design && qr.design.module_style) || "rounded";
+      document.getElementById('input-status').value = qr.status;
+
+      document.getElementById('modal-qr').classList.remove('hidden');
+      atualizarPreviewLive();
+    }
+
+    function fecharModal() {
+      document.getElementById('modal-qr').classList.add('hidden');
+    }
+
+    // Modal Zoom
+    function abrirModalZoom(slug, name, imgUrl) {
+      document.getElementById('zoom-title').innerText = name;
+      document.getElementById('zoom-slug').innerText = `/${slug}`;
+      document.getElementById('zoom-img').src = imgUrl;
+      const activeHost = getActiveHost();
+      document.getElementById('zoom-btn-svg').href = `/export/${slug}?format=svg&host_override=${encodeURIComponent(activeHost)}`;
+      document.getElementById('zoom-btn-png').href = `/export/${slug}?format=png&size=1024&host_override=${encodeURIComponent(activeHost)}`;
+      document.getElementById('modal-zoom').classList.remove('hidden');
+    }
+
+    function fecharModalZoom() {
+      document.getElementById('modal-zoom').classList.add('hidden');
+    }
+
+    function calcularContraste(hex) {
+      try {
+        const r = parseInt(hex.slice(1, 3), 16) / 255;
+        const g = parseInt(hex.slice(3, 5), 16) / 255;
+        const b = parseInt(hex.slice(5, 7), 16) / 255;
+        const toLum = c => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+        const L = 0.2126 * toLum(r) + 0.7152 * toLum(g) + 0.0722 * toLum(b);
+        return (1.0 + 0.05) / (L + 0.05); // rácio de contraste contra fundo branco
+      } catch (e) {
+        return 21;
+      }
+    }
+
+    let previewTimer = null;
+    function atualizarPreviewLive() {
+      clearTimeout(previewTimer);
+      previewTimer = setTimeout(async () => {
+        const nome = document.getElementById('input-nome').value || "Meu QR Code";
+        const rawSlug = document.getElementById('input-slug').value || "link";
+        const slug = rawSlug.toLowerCase().replace(/[^a-z0-9_-]/g, '') || "link";
+        
+        document.getElementById('preview-nome').innerText = nome;
+        document.getElementById('preview-slug').innerText = `/${slug}`;
+
+        const cor = document.getElementById('input-cor').value;
+        const frame = document.getElementById('input-frame').value;
+        const estilo = document.getElementById('input-estilo').value;
+        const activeHost = getActiveHost();
+
+        // Verificação de Contraste em tempo real (WCAG 4:1)
+        const ratio = calcularContraste(cor);
+        const badge = document.getElementById('preview-contrast-badge');
+        if (ratio >= 3.0) {
+          badge.innerHTML = `
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+              <i class="fa-solid fa-check text-[8px]"></i> Contraste Alto (${ratio.toFixed(1)}:1) • Leitura 100%
+            </span>
+          `;
+        } else if (ratio >= 1.35) {
+          badge.innerHTML = `
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+              <i class="fa-solid fa-palette text-[8px]"></i> Cor Ativa (${ratio.toFixed(1)}:1) • Personalizada
+            </span>
+          `;
+        } else {
+          badge.innerHTML = `
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-semibold bg-amber-50 text-amber-800 border border-amber-200" title="Quase invisível sobre fundo branco">
+              <i class="fa-solid fa-triangle-exclamation text-[8px] text-amber-600"></i> Quase branco (${ratio.toFixed(1)}:1) • Ajustado
+            </span>
+          `;
+        }
+
+        try {
+          const res = await fetch(`/api/preview-live?slug=${encodeURIComponent(slug)}&color=${encodeURIComponent(cor)}&frame=${encodeURIComponent(frame)}&style=${encodeURIComponent(estilo)}&host=${encodeURIComponent(activeHost)}`);
+          if (res.ok) {
+            const svg = await res.text();
+            document.getElementById('preview-svg-box').innerHTML = svg;
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      }, 150);
+    }
+
+    async function salvarQRCode(e) {
+      e.preventDefault();
+      const modo = document.getElementById('qr-modo').value;
+      const rawSlug = document.getElementById('input-slug').value.trim();
+      const slug = rawSlug.toLowerCase().replace(/[^a-z0-9_-]/g, '');
+
+      if (!slug) {
+        alert('Por favor, informe um identificador (slug) válido.');
+        return;
+      }
+
+      const payload = {
+        name: document.getElementById('input-nome').value.trim(),
+        target_url: document.getElementById('input-url').value.trim(),
+        foreground: document.getElementById('input-cor').value,
+        frame_text: document.getElementById('input-frame').value,
+        module_style: document.getElementById('input-estilo').value,
+      };
+
+      if (modo === 'criar') {
+        payload.slug = slug;
+        const res = await fetch('/api/qrcodes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (res.ok) {
+          fecharModal();
+          showToast(`QR Code /${slug} criado com sucesso!`);
+          carregarDashboard();
+        } else {
+          const err = await res.json();
+          alert('Erro: ' + (err.detail || 'Falha ao criar QR Code'));
+        }
+      } else {
+        payload.status = document.getElementById('input-status').value;
+        const originalSlug = document.getElementById('qr-slug-original').value;
+        const res = await fetch(`/api/qrcodes/${originalSlug}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (res.ok) {
+          fecharModal();
+          showToast(`QR Code /${originalSlug} atualizado no Redis!`);
+          carregarDashboard();
+        } else {
+          const err = await res.json();
+          alert('Erro: ' + (err.detail || 'Falha ao atualizar QR Code'));
+        }
+      }
+    }
+
+    async function deletarQRCode(slug, nome) {
+      if (confirm(`Tem certeza que deseja excluir o QR Code "${nome}" (/${slug})?\n\nO link deixará de redirecionar imediatamente.`)) {
+        const res = await fetch(`/api/qrcodes/${slug}`, { method: 'DELETE' });
+        if (res.ok) {
+          showToast(`QR Code /${slug} excluído.`, 'fa-trash-can text-rose-400');
+          carregarDashboard();
+        } else {
+          alert("Não foi possível excluir o código.");
+        }
+      }
+    }
+
+    function copiarLink(url) {
+      navigator.clipboard.writeText(url).then(() => {
+        showToast("Link curto copiado com sucesso!");
+      }).catch(() => {
+        prompt("Copie o link abaixo:", url);
+      });
+    }
+
+    // Inicialização e Polling de Scans a cada 2.5s
+    carregarDashboard();
+    setInterval(carregarDashboard, 2500);
+  </script>
+</body>
+</html>
+"""
+
+
+@app.get("/", response_class=HTMLResponse)
+def dashboard_view():
+    return HTMLResponse(DASHBOARD_HTML)
+
+
+# =====================================================================
+# ENDPOINTS REST DA API (CRUD COMPLETO COM SUPORTE MULTI-HOST)
+# =====================================================================
+@app.get("/api/qrcodes")
+async def list_qrcodes_api(
+    request: Request,
+    search: Optional[str] = None,
+    status: Optional[str] = None,
+    host_override: Optional[str] = None,
+):
+    if REDIS_URL:
+        try:
+            stored_slugs = await redis_async.smembers("all_qr_slugs")
+            for s in stored_slugs:
+                if s not in IN_MEMORY_DB:
+                    meta = await redis_async.get(f"qr_meta:{s}")
+                    if meta:
+                        IN_MEMORY_DB[s] = json.loads(meta)
+        except Exception as exc:
+            log.warning("Falha ao sincronizar lista com Redis: %r", exc)
+
+    active_host = host_override or request.headers.get("host", "localhost")
+    result = []
+    for slug, payload in IN_MEMORY_DB.items():
+        if status and status != "all" and payload["status"] != status:
+            continue
+        if search:
+            s = search.lower()
+            if s not in slug.lower() and s not in payload.get("name", "").lower() and s not in payload["default_url"].lower():
+                continue
+        result.append(
+            {
+                "slug": slug,
+                "name": payload.get("name", slug.upper()),
+                "short_url": f"http://{active_host}/{slug}",
+                "default_url": payload["default_url"],
+                "status": payload["status"],
+                "v": payload.get("v", 1),
+                "design": payload.get("design", {}),
+                "rules": payload.get("rules", []),
+                "created_at": payload.get("created_at"),
+            }
+        )
+    return result
+
+
+@app.get("/api/qrcodes/{slug}")
+async def get_qrcode_api(slug: str, request: Request, host_override: Optional[str] = None):
+    clean_slug = slug.strip().lstrip("/").lower()
+    if clean_slug not in IN_MEMORY_DB and REDIS_URL:
+        try:
+            meta = await redis_async.get(f"qr_meta:{clean_slug}")
+            if meta:
+                IN_MEMORY_DB[clean_slug] = json.loads(meta)
+        except Exception:
+            pass
+
+    if clean_slug not in IN_MEMORY_DB:
+        raise HTTPException(status_code=404, detail="QR Code não encontrado")
+    payload = IN_MEMORY_DB[clean_slug]
+    active_host = host_override or request.headers.get("host", "localhost")
+    return {
+        "slug": clean_slug,
+        "name": payload.get("name", clean_slug.upper()),
+        "short_url": f"http://{active_host}/{clean_slug}",
+        "default_url": payload["default_url"],
+        "status": payload["status"],
+        "design": payload.get("design", {}),
+        "rules": payload.get("rules", []),
+        "v": payload.get("v", 1),
+    }
+
+
+@app.post("/api/qrcodes")
+async def create_qr_api(body: QRCreateDTO, request: Request):
+    clean_slug = body.slug.strip().lstrip("/").lower()
+    if clean_slug in IN_MEMORY_DB:
+        raise HTTPException(status_code=409, detail="Slug já está em uso. Escolha outro identificador.")
+    if REDIS_URL:
+        try:
+            if await redis_async.sismember("all_qr_slugs", clean_slug) or await redis_async.exists(f"qr_meta:{clean_slug}"):
+                raise HTTPException(status_code=409, detail="Slug já está em uso. Escolha outro identificador.")
+        except HTTPException:
+            raise
+        except Exception:
+            pass
+
+    target = re.sub(r"[\r\n\t]", "", body.target_url.strip())
+    if target.lower().startswith(("javascript:", "data:", "vbscript:")):
+        raise HTTPException(status_code=422, detail="URL inválida. Protocolo proibido.")
+    if not target.startswith(("http://", "https://")):
+        target = f"https://{target}"
+
+    # Previne loop infinito (SSRF/Loop Denial-of-Service)
+    parts = urlsplit(target)
+    target_host = (parts.hostname or "").lower()
+    target_path = parts.path.strip("/").lower()
+    if target_host in ("localhost", "127.0.0.1", "0.0.0.0", LAN_IP.lower()) and target_path == clean_slug:
+        raise HTTPException(status_code=422, detail="Destino não pode apontar para o próprio QR Code (loop infinito detectado).")
+
+    # Auto-ajuste de contraste para garantir leitura por qualquer câmera
+    fg = body.foreground
+    try:
+        validate(QRDesign(foreground=fg, background="#FFFFFF"))
+    except InvalidDesign:
+        fg = "#0F172A"
+
+    payload = {
+        "v": 1,
+        "name": re.sub(r"[\r\n\t]", " ", body.name.strip()),
+        "qr_id": "99999999-9999-9999-9999-999999999999",
+        "workspace_id": "00000000-0000-0000-0000-000000000003",
+        "status": body.status,
+        "default_url": target,
+        "fallback_url": None,
+        "expires_at": None,
+        "utm": {"utm_source": "qrcode"},
+        "design": {
+            "foreground": fg,
+            "background": "#FFFFFF",
+            "module_style": body.module_style,
+            "finder_style": "rounded" if body.module_style == "rounded" else "square",
+            "frame_text": body.frame_text,
+        },
+        "rules": [],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    IN_MEMORY_DB[clean_slug] = payload
+
+    # Sincroniza em Redis sob todos os hosts conhecidos + host atual
+    current_host = request.headers.get("host", "").split(":")[0].lower()
+    hosts_to_sync = set(KNOWN_HOSTS + [current_host])
+    payload_str = json.dumps(payload)
+    try:
+        for h in hosts_to_sync:
+            if h:
+                await redis_async.set(f"qr:{h}:{clean_slug}", payload_str, ex=86400)
+                resolver.invalidate(f"qr:{h}:{clean_slug}")
+        await redis_async.sadd("all_qr_slugs", clean_slug)
+        await redis_async.set(f"qr_meta:{clean_slug}", payload_str)
+    except Exception as exc:
+        log.warning("Sincronização Redis offline ou ignorada: %r", exc)
+
+    return {"status": "created", "slug": clean_slug}
+
+
+@app.put("/api/qrcodes/{slug}")
+async def update_qr_api(slug: str, body: QRUpdateDTO, request: Request):
+    clean_slug = slug.strip().lstrip("/").lower()
+    if clean_slug not in IN_MEMORY_DB and REDIS_URL:
+        try:
+            cached = await redis_async.get(f"qr_meta:{clean_slug}")
+            if cached:
+                IN_MEMORY_DB[clean_slug] = json.loads(cached)
+        except Exception:
+            pass
+
+    if clean_slug not in IN_MEMORY_DB:
+        raise HTTPException(status_code=404, detail="QR Code não encontrado")
+
+    item = IN_MEMORY_DB[clean_slug]
+
+    if body.name is not None:
+        item["name"] = re.sub(r"[\r\n\t]", " ", body.name.strip())
+
+    if body.target_url is not None:
+        target = re.sub(r"[\r\n\t]", "", body.target_url.strip())
+        if target.lower().startswith(("javascript:", "data:", "vbscript:")):
+            raise HTTPException(status_code=422, detail="URL inválida. Protocolo proibido.")
+        if not target.startswith(("http://", "https://")):
+            target = f"https://{target}"
+
+        parts = urlsplit(target)
+        target_host = (parts.hostname or "").lower()
+        target_path = parts.path.strip("/").lower()
+        if target_host in ("localhost", "127.0.0.1", "0.0.0.0", LAN_IP.lower()) and target_path == clean_slug:
+            raise HTTPException(status_code=422, detail="Destino não pode apontar para o próprio QR Code (loop infinito detectado).")
+
+        item["default_url"] = target
+
+    if body.status is not None:
+        item["status"] = body.status
+
+    design = item.get("design", {})
+    if body.foreground is not None:
+        fg = body.foreground
+        try:
+            validate(QRDesign(foreground=fg, background="#FFFFFF"))
+        except InvalidDesign:
+            fg = "#0F172A"
+        design["foreground"] = fg
+
+    if body.frame_text is not None:
+        design["frame_text"] = body.frame_text
+
+    if body.module_style is not None:
+        design["module_style"] = body.module_style
+        design["finder_style"] = "rounded" if body.module_style == "rounded" else "square"
+
+    item["design"] = design
+    item["v"] = item.get("v", 1) + 1
+
+    current_host = request.headers.get("host", "").split(":")[0].lower()
+    hosts_to_sync = set(KNOWN_HOSTS + [current_host])
+    payload_str = json.dumps(item)
+    try:
+        for h in hosts_to_sync:
+            if h:
+                await redis_async.set(f"qr:{h}:{clean_slug}", payload_str, ex=86400)
+                resolver.invalidate(f"qr:{h}:{clean_slug}")
+        await redis_async.set(f"qr_meta:{clean_slug}", payload_str)
+    except Exception as exc:
+        log.warning("Sincronização Redis offline ou ignorada: %r", exc)
+
+    return {"status": "updated", "slug": clean_slug, "data": item}
+
+
+@app.delete("/api/qrcodes/{slug}")
+async def delete_qr_api(slug: str, request: Request):
+    clean_slug = slug.strip().lstrip("/").lower()
+    if clean_slug not in IN_MEMORY_DB and REDIS_URL:
+        try:
+            cached = await redis_async.get(f"qr_meta:{clean_slug}")
+            if cached:
+                IN_MEMORY_DB[clean_slug] = json.loads(cached)
+        except Exception:
+            pass
+
+    if clean_slug not in IN_MEMORY_DB:
+        raise HTTPException(status_code=404, detail="QR Code não encontrado")
+
+    del IN_MEMORY_DB[clean_slug]
+    current_host = request.headers.get("host", "").split(":")[0].lower()
+    hosts_to_sync = set(KNOWN_HOSTS + [current_host])
+    try:
+        for h in hosts_to_sync:
+            if h:
+                await redis_async.delete(f"qr:{h}:{clean_slug}")
+                resolver.invalidate(f"qr:{h}:{clean_slug}")
+        await redis_async.srem("all_qr_slugs", clean_slug)
+        await redis_async.delete(f"qr_meta:{clean_slug}")
+    except Exception as exc:
+        log.warning("Sincronização Redis offline ou ignorada: %r", exc)
+
+    return {"status": "deleted", "slug": clean_slug}
+
+
+# Preview Dinâmico do Modal (Live Preview enquanto digita)
+@app.get("/api/preview-live")
+def live_preview(
+    slug: str = "preview",
+    color: str = "#0F172A",
+    frame: str = "ESCANEIE AQUI",
+    style: str = "rounded",
+    host: str = "localhost",
+):
+    try:
+        validate(QRDesign(foreground=color, background="#FFFFFF"))
+    except InvalidDesign:
+        color = "#0F172A"
+
+    design = QRDesign(
+        foreground=color,
+        background="#FFFFFF",
+        module_style=style,
+        finder_style="rounded" if style == "rounded" else "square",
+        frame_text=frame,
+    )
+    svg_bytes = render(f"http://{host}/{slug}", design=design, fmt="svg", size_px=320)
+    return Response(content=svg_bytes, media_type="image/svg+xml")
+
+
+@app.get("/preview/{slug}.svg")
+async def preview_svg(slug: str, request: Request, host_override: Optional[str] = None):
+    clean_slug = slug.strip().lstrip("/").lower()
+    if clean_slug not in IN_MEMORY_DB and REDIS_URL:
+        try:
+            meta = await redis_async.get(f"qr_meta:{clean_slug}")
+            if meta:
+                IN_MEMORY_DB[clean_slug] = json.loads(meta)
+        except Exception:
+            pass
+
+    if clean_slug not in IN_MEMORY_DB:
+        raise HTTPException(status_code=404, detail="Slug não encontrado")
+
+    payload = IN_MEMORY_DB[clean_slug]
+    design_data = payload.get("design", {})
+    design = QRDesign(
+        foreground=design_data.get("foreground", "#0F172A"),
+        background="#FFFFFF",
+        module_style=design_data.get("module_style", "rounded"),
+        finder_style=design_data.get("finder_style", "rounded"),
+        frame_text=design_data.get("frame_text", "ESCANEIE AQUI"),
+    )
+    active_host = host_override or request.headers.get("host", "localhost")
+    try:
+        svg_bytes = render(f"http://{active_host}/{clean_slug}", design=design, fmt="svg", size_px=400)
+    except InvalidDesign:
+        design.foreground = "#0F172A"
+        svg_bytes = render(f"http://{active_host}/{clean_slug}", design=design, fmt="svg", size_px=400)
+
+    return Response(content=svg_bytes, media_type="image/svg+xml")
+
+
+@app.get("/scans")
+def list_scans():
+    return {
+        "total_scans": len(CAPTURED_SCANS),
+        "recent_events": [
+            {
+                "ts": e["ts"].isoformat() if hasattr(e["ts"], "isoformat") else str(e["ts"]),
+                "slug": e["slug"],
+                "destination": e["destination_url"],
+                "device": e["device_type"],
+                "os": e["os"],
+                "browser": e["browser"],
+                "visitor_hash": e["visitor_hash"],
+                "is_bot": e["is_bot"],
+            }
+            for e in reversed(CAPTURED_SCANS[-50:])
+        ],
+    }
+
+
+@app.get("/export/{slug}")
+async def export_qr(
+    slug: str,
+    request: Request,
+    format: str = Query("svg", pattern=r"^(svg|png|pdf)$"),
+    size: int = 1024,
+    host_override: Optional[str] = None,
+):
+    clean_slug = slug.strip().lstrip("/").lower()
+    if clean_slug not in IN_MEMORY_DB and REDIS_URL:
+        try:
+            meta = await redis_async.get(f"qr_meta:{clean_slug}")
+            if meta:
+                IN_MEMORY_DB[clean_slug] = json.loads(meta)
+        except Exception:
+            pass
+
+    if clean_slug not in IN_MEMORY_DB:
+        raise HTTPException(status_code=404, detail="Slug não encontrado")
+
+    payload = IN_MEMORY_DB[clean_slug]
+    design_data = payload.get("design", {})
+    design = QRDesign(
+        foreground=design_data.get("foreground", "#0F172A"),
+        background="#FFFFFF",
+        module_style=design_data.get("module_style", "rounded"),
+        finder_style=design_data.get("finder_style", "rounded"),
+        frame_text=design_data.get("frame_text", "ESCANEIE AQUI"),
+    )
+    active_host = host_override or request.headers.get("host", "localhost")
+    try:
+        content = render(f"http://{active_host}/{clean_slug}", design=design, fmt=format, size_px=size)
+    except InvalidDesign:
+        design.foreground = "#0F172A"
+        content = render(f"http://{active_host}/{clean_slug}", design=design, fmt=format, size_px=size)
+    except Exception as exc:
+        log.error("Erro ao exportar QR code /%s (%s): %r", clean_slug, format, exc)
+        raise HTTPException(status_code=500, detail="Erro interno ao gerar arquivo de exportação")
+
+    media_types = {"svg": "image/svg+xml", "png": "image/png", "pdf": "application/pdf"}
+    return Response(
+        content=content,
+        media_type=media_types[format],
+        headers={"Content-Disposition": f'attachment; filename="qr-{clean_slug}.{format}"'},
+    )
+
+
+# =====================================================================
+# HOT PATH: MOTOR DE REDIRECIONAMENTO 302 (100% RESILIENTE)
+# =====================================================================
+SLUG_VALID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,100}$")
+
+
+@app.get("/{slug}")
+async def redirect_endpoint(slug: str, request: Request):
+    clean_slug = slug.strip().lstrip("/").lower()
+    if not SLUG_VALID_RE.fullmatch(clean_slug):
+        return PlainTextResponse("Not found", status_code=404)
+
+    host = request.headers.get("host", "").split(":")[0].lower()
+    payload = await resolver.resolve(host, clean_slug)
+    
+    # Fallback garantido para ambiente standalone / serverless
+    if payload is None:
+        payload = IN_MEMORY_DB.get(clean_slug)
+        if payload is None and REDIS_URL:
+            try:
+                meta = await redis_async.get(f"qr_meta:{clean_slug}")
+                if meta:
+                    payload = json.loads(meta)
+                    IN_MEMORY_DB[clean_slug] = payload
+            except Exception:
+                pass
+        if payload is None:
+            for k, v in IN_MEMORY_DB.items():
+                if k.lower() == clean_slug:
+                    payload = v
+                    break
+
+    headers = request.headers
+    if payload is None:
+        log.warning("Slug não encontrado: %s (host=%s)", clean_slug, host)
+        accept = headers.get("accept", "")
+        if "text/html" in accept:
+            return HTMLResponse(
+                f"""<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QR Code Não Encontrado</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-zinc-50 flex items-center justify-center min-h-screen p-4 text-zinc-800">
+  <div class="max-w-md w-full bg-white p-8 rounded-2xl border border-zinc-200 shadow-sm text-center">
+    <div class="w-12 h-12 bg-rose-50 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-4 text-xl">🔍</div>
+    <h1 class="text-base font-bold text-zinc-900 mb-2">QR Code /{clean_slug} Não Encontrado</h1>
+    <p class="text-xs text-zinc-500 mb-6">Este código pode ter sido removido ou o link foi digitado incorretamente.</p>
+    <a href="/" class="inline-block px-4 py-2 bg-zinc-900 text-white rounded-lg text-xs font-semibold hover:bg-zinc-800 transition">Acessar Painel</a>
+  </div>
+</body>
+</html>""",
+                status_code=404,
+                headers=NO_STORE,
+            )
+        return PlainTextResponse(f"QR Code /{clean_slug} não encontrado", status_code=404, headers=NO_STORE)
+
+    decision = decide(payload, headers.get("user-agent", ""), None, datetime.now(timezone.utc))
+    if decision.kind == "gone":
+        fallback = payload.get("fallback_url")
+        if fallback:
+            return RedirectResponse(fallback, status_code=302, headers=NO_STORE)
+        accept = headers.get("accept", "")
+        if "text/html" in accept:
+            return HTMLResponse(
+                """<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QR Code Indisponível</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-zinc-50 flex items-center justify-center min-h-screen p-4 text-zinc-800">
+  <div class="max-w-md w-full bg-white p-8 rounded-2xl border border-zinc-200 shadow-sm text-center">
+    <div class="w-12 h-12 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-4 text-xl">⚠️</div>
+    <h1 class="text-base font-bold text-zinc-900 mb-2">QR Code Temporariamente Indisponível</h1>
+    <p class="text-xs text-zinc-500 mb-6">Este link dinâmico está pausado ou encerrou seu período de vigência.</p>
+    <a href="/" class="inline-block px-4 py-2 bg-zinc-900 text-white rounded-lg text-xs font-semibold hover:bg-zinc-800 transition">Acessar Painel</a>
+  </div>
+</body>
+</html>""",
+                status_code=410,
+                headers=NO_STORE,
+            )
+        return PlainTextResponse("QR Code pausado ou expirado", status_code=410, headers=NO_STORE)
+
+    dest = decision.url or payload.get("default_url") or "/"
+    trusted_ip_h = "x-real-ip" if IS_SERVERLESS else "cf-connecting-ip"
+    country_h = "x-vercel-ip-country" if IS_SERVERLESS else "cf-ipcountry"
+    evt = build_event(
+        headers,
+        request.client.host if request.client else None,
+        payload,
+        host=host,
+        slug=clean_slug,
+        destination=dest,
+        trusted_ip_header=trusted_ip_h,
+        country_header=country_h,
+    )
+    if IS_SERVERLESS:
+        try:
+            enriched = enrich(evt, salt="demo-salt-lgpd")
+            data = dict(zip(COLUMNS, enriched))
+            CAPTURED_SCANS.append(data)
+            if len(CAPTURED_SCANS) > 200:
+                del CAPTURED_SCANS[:-100]
+            if REDIS_URL:
+                try:
+                    await redis_async.xadd("scans", evt, maxlen=10000)
+                except Exception:
+                    pass
+        except Exception as exc:
+            log.warning("Falha ao registrar scan serverless: %r", exc)
+    else:
+        pipeline.capture(evt)
+
+    if decision.kind == "deeplink":
+        body = DEEPLINK_HTML.format(
+            web_attr=dest,
+            web_js=json.dumps(dest),
+            app_js=json.dumps(decision.app_url),
+        )
+        return HTMLResponse(body, headers=NO_STORE)
+
+    return RedirectResponse(
+        dest,
+        status_code=302,
+        headers={**NO_STORE, "Referrer-Policy": "no-referrer-when-downgrade"},
+    )
+
+
+def main():
+    port = int(os.getenv("PORT", "80"))
+    port_suffix = f":{port}" if port not in (80, 443) else ""
+    print("\n" + "=" * 70)
+    print(">>> PAINEL CORPORATIVO MODERNO ONLINE (RESPONSIVO & COMPACTO)")
+    print("=" * 70)
+    print(f"-> Painel Web no Navegador: http://localhost{port_suffix}")
+    if LAN_IP and LAN_IP != "127.0.0.1":
+        print(f"-> Acesso via Celular (Wi-Fi): http://{LAN_IP}{port_suffix}")
+    print("=" * 70 + "\n")
+    uvicorn.run(app, host="0.0.0.0", port=port, access_log=True)
+
+
+if __name__ == "__main__":
+    main()

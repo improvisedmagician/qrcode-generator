@@ -1,0 +1,143 @@
+services:
+  # =====================================================================
+  # 1. Armazenamento & Infraestrutura
+  # =====================================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: qr-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: qr
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/postgres/001_init.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d qr"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: qr-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "512mb", "--maxmemory-policy", "noeviction"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8-alpine
+    container_name: qr-clickhouse
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: analytics
+    ports:
+      - "8123:8123" # HTTP API
+      - "9000:9000" # Native protocol
+    volumes:
+      - chdata:/var/lib/clickhouse
+      - ./db/clickhouse/001_scans.sql:/docker-entrypoint-initdb.d/001_scans.sql:ro
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+
+  # =====================================================================
+  # 2. Hot Path: Motor de Redirecionamento de Alta Disponibilidade
+  # =====================================================================
+  redirect:
+    build:
+      context: ./services/redirect
+      dockerfile: Dockerfile
+    container_name: qr-redirect
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      PG_REPLICA_DSN: postgresql://app:app@postgres:5432/qr
+      SCAN_STREAM: scans
+      SPOOL_DIR: /var/spool/qr
+      L1_TTL_SECONDS: "30"
+      REDIS_TIMEOUT: "0.05"
+      PG_TIMEOUT: "0.3"
+      TRUSTED_IP_HEADER: "cf-connecting-ip"
+      COUNTRY_HEADER: "cf-ipcountry"
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    volumes:
+      - spool_data:/var/spool/qr
+
+  # =====================================================================
+  # 3. Data Plane: Processador Assíncrono de Analytics
+  # =====================================================================
+  analytics-worker:
+    build:
+      context: ./services/analytics_worker
+      dockerfile: Dockerfile
+    container_name: qr-analytics-worker
+    restart: unless-stopped
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      SCAN_STREAM: scans
+      CONSUMER_GROUP: analytics
+      CH_HOST: clickhouse
+      CH_PORT: "8123"
+      CH_DATABASE: analytics
+      VISITOR_SALT: "dev-salt-change-in-production-for-lgpd"
+      BATCH_SIZE: "1000"
+    depends_on:
+      redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+
+  # =====================================================================
+  # 4. Control Plane: API REST do Dashboard Corporativo
+  # =====================================================================
+  api:
+    build:
+      context: ./services/api
+      dockerfile: Dockerfile
+    container_name: qr-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      PG_DSN: postgresql://app:app@postgres:5432/qr
+      REDIS_URL: redis://redis:6379/0
+      CH_HOST: clickhouse
+      CH_PORT: "8123"
+      CH_DATABASE: analytics
+      JWT_SECRET: "dev-super-secret-jwt-key-change-in-production"
+      SEED_DEMO: "1"
+      DEFAULT_DOMAIN: "localhost"
+      SHORT_URL_PORT: ":8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  redisdata:
+  chdata:
+  spool_data:

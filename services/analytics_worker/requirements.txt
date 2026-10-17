@@ -1,0 +1,4 @@
+redis==5.2.1
+clickhouse-connect==0.8.11
+geoip2==4.8.1
+user-agents==2.2.0

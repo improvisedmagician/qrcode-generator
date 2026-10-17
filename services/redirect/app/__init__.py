@@ -1,0 +1,1 @@
+"""Redirect Service (hot path)."""
