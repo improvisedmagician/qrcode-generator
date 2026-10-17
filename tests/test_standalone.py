@@ -344,5 +344,45 @@ def test_cors_options_preflight(client):
     assert resp.headers.get("access-control-allow-origin") in [test_origin, "*"]
 
 
+def test_clicks_counting_per_qrcode(client):
+    slug = "click-counter-test"
+    client.post(
+        "/api/qrcodes",
+        json={
+            "name": "QR Teste Cliques",
+            "slug": slug,
+            "target_url": "https://meusite.com.br/clique",
+            "foreground": "#000000",
+            "frame_text": "ACESSE",
+            "module_style": "rounded",
+            "status": "active",
+        },
+    )
+
+    resp_init = client.get(f"/api/qrcodes/{slug}")
+    assert resp_init.status_code == 200
+    initial_clicks = resp_init.json().get("clicks", 0)
+
+    for _ in range(3):
+        r = client.get(f"/{slug}", follow_redirects=False)
+        assert r.status_code == 302
+
+    resp_after = client.get(f"/api/qrcodes/{slug}")
+    assert resp_after.status_code == 200
+    assert resp_after.json()["clicks"] == initial_clicks + 3
+
+    resp_list = client.get("/api/qrcodes")
+    assert resp_list.status_code == 200
+    item = next(q for q in resp_list.json() if q["slug"] == slug)
+    assert item["clicks"] == initial_clicks + 3
+
+    resp_scans = client.get("/scans")
+    assert resp_scans.status_code == 200
+    scans_data = resp_scans.json()
+    assert "clicks_by_slug" in scans_data
+    assert scans_data["clicks_by_slug"].get(slug) == initial_clicks + 3
+
+
+
 
 

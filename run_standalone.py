@@ -118,6 +118,15 @@ for slug, payload in list(IN_MEMORY_DB.items()):
         sync_redis_slug(slug, payload)
 
 CAPTURED_SCANS: list[dict] = []
+SCAN_COUNTS: dict[str, int] = {}
+
+if redis_sync:
+    try:
+        saved_clicks = redis_sync.hgetall("qr_clicks")
+        if saved_clicks:
+            SCAN_COUNTS.update({k: int(v) for k, v in saved_clicks.items()})
+    except Exception as exc:
+        log.warning("Falha ao ler qr_clicks do Redis: %r", exc)
 
 
 async def simulate_analytics_worker():
@@ -708,9 +717,17 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       }
     }
 
-    function saveStoredScans(scans) {
+    function getStoredClicks() {
       try {
-        localStorage.setItem('cached_scans', JSON.stringify(scans.slice(0, 50)));
+        return JSON.parse(localStorage.getItem('qr_clicks') || '{}');
+      } catch {
+        return {};
+      }
+    }
+
+    function saveStoredClicks(clicks) {
+      try {
+        localStorage.setItem('qr_clicks', JSON.stringify(clicks || {}));
       } catch {}
     }
 
@@ -723,6 +740,15 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         ]);
         const serverQRs = await resQRs.json();
         const scansData = await resScans.json();
+
+        // Mescla cliques do servidor com o cache do localStorage
+        const storedClicks = getStoredClicks();
+        const serverClicks = (scansData && scansData.clicks_by_slug) ? scansData.clicks_by_slug : {};
+        const mergedClicks = { ...storedClicks };
+        for (const [k, v] of Object.entries(serverClicks)) {
+          mergedClicks[k] = Math.max(mergedClicks[k] || 0, Number(v) || 0);
+        }
+        saveStoredClicks(mergedClicks);
 
         const deletedSlugs = getDeletedSlugs();
         const customQRs = Object.values(getCustomQRs());
@@ -756,7 +782,11 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
           }
         });
 
-        todosQRs = Array.from(qrsMap.values());
+        todosQRs = Array.from(qrsMap.values()).map(q => {
+          const k = String(q.slug).toLowerCase().trim();
+          const clicks = Math.max(mergedClicks[k] || 0, Number(q.clicks) || 0);
+          return { ...q, clicks };
+        });
 
         // Mescla scans do servidor com o cache do localStorage para estabilidade serverless
         const existingScans = getStoredScans();
@@ -843,6 +873,9 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
           ? '<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200"><span class="w-1 h-1 rounded-full bg-emerald-500"></span>Ativo</span>'
           : '<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-zinc-100 text-zinc-600 border border-zinc-200"><span class="w-1 h-1 rounded-full bg-zinc-400"></span>Pausado</span>';
 
+        const clicks = Number(qr.clicks || 0);
+        const clicksBadge = `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200/80" title="${clicks} acessos registrados"><i class="fa-solid fa-arrow-pointer text-[8px]"></i>${clicks} ${clicks === 1 ? 'scan' : 'scans'}</span>`;
+
         const safeSlug = escapeHtml(qr.slug);
         const safeName = escapeHtml(qr.name);
         const jsSlug = escapeJs(qr.slug);
@@ -856,10 +889,13 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         return `
           <div class="bg-white rounded-xl border border-zinc-200/80 shadow-2xs hover:border-zinc-300 hover:shadow-xs transition p-3.5 flex flex-col justify-between">
             <div>
-              <!-- Top: Nome e Status -->
+              <!-- Top: Nome, Cliques e Status -->
               <div class="flex items-center justify-between gap-2 mb-2">
                 <h4 class="font-bold text-zinc-900 text-xs truncate" title="${safeName}">${safeName}</h4>
-                ${statusBadge}
+                <div class="flex items-center gap-1.5 shrink-0">
+                  ${clicksBadge}
+                  ${statusBadge}
+                </div>
               </div>
 
               <!-- Meio: QR Code Thumbnail + Links -->
@@ -926,6 +962,9 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
           ? '<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">Ativo</span>'
           : '<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-zinc-100 text-zinc-600 border border-zinc-200">Pausado</span>';
 
+        const clicks = Number(qr.clicks || 0);
+        const clicksBadge = `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200/80" title="${clicks} acessos registrados"><i class="fa-solid fa-arrow-pointer text-[8px]"></i>${clicks} ${clicks === 1 ? 'scan' : 'scans'}</span>`;
+
         const safeSlug = escapeHtml(qr.slug);
         const safeName = escapeHtml(qr.name);
         const jsSlug = escapeJs(qr.slug);
@@ -944,6 +983,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
               <div class="min-w-0">
                 <div class="flex items-center gap-2">
                   <h4 class="font-bold text-xs text-zinc-900 truncate" title="${safeName}">${safeName}</h4>
+                  ${clicksBadge}
                   ${statusBadge}
                 </div>
                 <div class="flex items-center gap-2 text-[11px] text-zinc-500 mt-0.5">
@@ -1224,6 +1264,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         localStorage.removeItem('custom_qrcodes');
         localStorage.removeItem('deleted_qr_slugs');
         localStorage.removeItem('cached_scans');
+        localStorage.removeItem('qr_clicks');
         lastRenderedScansJson = '';
         const defaultSlugs = ['promo', 'blackfriday', 'insta', 'jogos205'];
         const currentSlugs = todosQRs.map(q => q.slug);
@@ -1292,6 +1333,15 @@ async def list_qrcodes_api(
         except Exception as exc:
             log.warning("Falha ao sincronizar lista com Redis: %r", exc)
 
+    clicks_map = dict(SCAN_COUNTS)
+    if REDIS_URL and redis_async:
+        try:
+            stored_clicks = await redis_async.hgetall("qr_clicks")
+            if stored_clicks:
+                clicks_map.update({k: int(v) for k, v in stored_clicks.items()})
+        except Exception:
+            pass
+
     active_host = host_override or request.headers.get("host", "localhost")
     result = []
     for slug, payload in IN_MEMORY_DB.items():
@@ -1312,6 +1362,7 @@ async def list_qrcodes_api(
                 "default_url": payload["default_url"],
                 "status": payload["status"],
                 "v": payload.get("v", 1),
+                "clicks": clicks_map.get(clean_slug, 0),
                 "design": payload.get("design", {}),
                 "rules": payload.get("rules", []),
                 "created_at": payload.get("created_at"),
@@ -1351,6 +1402,7 @@ async def get_qrcode_api(slug: str, request: Request, host_override: Optional[st
         "design": payload.get("design", {}),
         "rules": payload.get("rules", []),
         "v": payload.get("v", 1),
+        "clicks": SCAN_COUNTS.get(clean_slug, 0),
     }
 
 
@@ -1520,6 +1572,7 @@ async def delete_qr_api(slug: str, request: Request):
     # Registra tombstone imediatamente e remove do estado em memória
     DELETED_SLUGS.add(clean_slug)
     IN_MEMORY_DB.pop(clean_slug, None)
+    SCAN_COUNTS.pop(clean_slug, None)
 
     current_host = request.headers.get("host", "").split(":")[0].lower()
     hosts_to_sync = set(KNOWN_HOSTS + [current_host])
@@ -1528,6 +1581,7 @@ async def delete_qr_api(slug: str, request: Request):
             await redis_async.sadd("deleted_qr_slugs", clean_slug)
             await redis_async.srem("all_qr_slugs", clean_slug)
             await redis_async.delete(f"qr_meta:{clean_slug}")
+            await redis_async.hdel("qr_clicks", clean_slug)
             for h in hosts_to_sync:
                 if h:
                     await redis_async.delete(f"qr:{h}:{clean_slug}")
@@ -1600,9 +1654,19 @@ async def preview_svg(slug: str, request: Request, host_override: Optional[str] 
 
 
 @app.get("/scans")
-def list_scans():
+async def list_scans():
+    clicks_map = dict(SCAN_COUNTS)
+    if REDIS_URL and redis_async:
+        try:
+            stored_clicks = await redis_async.hgetall("qr_clicks")
+            if stored_clicks:
+                clicks_map.update({k: int(v) for k, v in stored_clicks.items()})
+        except Exception:
+            pass
+    total_clicks = sum(clicks_map.values())
     return {
-        "total_scans": len(CAPTURED_SCANS),
+        "total_scans": max(total_clicks, len(CAPTURED_SCANS)),
+        "clicks_by_slug": clicks_map,
         "recent_events": [
             {
                 "ts": e["ts"].isoformat() if hasattr(e["ts"], "isoformat") else str(e["ts"]),
@@ -1771,6 +1835,15 @@ async def redirect_endpoint(slug: str, request: Request):
         trusted_ip_header=trusted_ip_h,
         country_header=country_h,
     )
+    # Contabiliza cliques por QR Code
+    clean_k = clean_slug.lower()
+    SCAN_COUNTS[clean_k] = SCAN_COUNTS.get(clean_k, 0) + 1
+    if redis_async:
+        try:
+            await redis_async.hincrby("qr_clicks", clean_k, 1)
+        except Exception:
+            pass
+
     if IS_SERVERLESS:
         try:
             enriched = enrich(evt, salt="demo-salt-lgpd")
