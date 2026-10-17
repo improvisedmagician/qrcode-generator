@@ -2,9 +2,15 @@
 .git
 .pytest_cache
 __pycache__
+**/__pycache__
 *.pyc
+**/*.pyc
 tests
+**/tests
 db
 docs
 spool
 docker-compose.yml
+.coverage
+*.diff
+*.md
