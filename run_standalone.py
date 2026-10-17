@@ -29,7 +29,6 @@ import redis.asyncio as aioredis
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from pydantic import BaseModel, Field
-import uvicorn
 
 from services.api.app.qr_render import InvalidDesign, QRDesign, render, validate, verify_readable
 from services.redirect.app.capture import EventPipeline, build_event
@@ -1767,6 +1766,7 @@ async def redirect_endpoint(slug: str, request: Request):
 
 
 def main():
+    import uvicorn
     port = int(os.getenv("PORT", "80"))
     port_suffix = f":{port}" if port not in (80, 443) else ""
     print("\n" + "=" * 70)

@@ -303,9 +303,12 @@ def to_png(layout: Layout, size_px: int = 2048, dpi: int = 300, **_extra) -> byt
 
 # ---------- Backend PDF (vetor) ----------
 def to_pdf(layout: Layout, size_mm: float = 100.0, **_extra) -> bytes:
-    from reportlab.lib.units import mm
-    from reportlab.lib.utils import ImageReader
-    from reportlab.pdfgen import canvas
+    try:
+        from reportlab.lib.units import mm
+        from reportlab.lib.utils import ImageReader
+        from reportlab.pdfgen import canvas
+    except ImportError:
+        raise ValueError("Exportação em PDF requer a biblioteca reportlab. Utilize SVG (vetorial) ou PNG.")
 
     if "size_px" in _extra and size_mm == 100.0:
         size_mm = max(20.0, _extra["size_px"] / 10.0)
