@@ -1034,6 +1034,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         (Array.isArray(serverQRs) ? serverQRs : []).forEach(q => {
           const k = String(q.slug).toLowerCase().trim();
           qrsMap.set(k, q);
+          saveCustomQR(q);
         });
 
         customQRs.forEach(q => {
@@ -1168,8 +1169,8 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         const bgEndParam = encodeURIComponent(d.background_color_end || '');
         const frameParam = encodeURIComponent(d.frame_text || 'ESCANEIE AQUI');
         const styleParam = encodeURIComponent(d.module_style || 'rounded');
-
-        const qrImgUrl = `/preview/${encodeURIComponent(qr.slug)}.svg?host_override=${encodeURIComponent(activeHost)}&v=${qr.v || 1}&color=${fgParam}&bg_color=${bgParam}&bg_type=${bgTypeParam}&bg_color_end=${bgEndParam}&frame=${frameParam}&style=${styleParam}`;
+        const vParam = `${qr.v || 1}_${(d.foreground || '').replace('#', '')}_${(d.background || '').replace('#', '')}`;
+        const qrImgUrl = `/preview/${encodeURIComponent(qr.slug)}.svg?host_override=${encodeURIComponent(activeHost)}&v=${encodeURIComponent(vParam)}&color=${fgParam}&bg_color=${bgParam}&bg_type=${bgTypeParam}&bg_color_end=${bgEndParam}&frame=${frameParam}&style=${styleParam}`;
         const liveFallbackUrl = `/api/preview-live?slug=${encodeURIComponent(qr.slug)}&color=${fgParam}&bg_color=${bgParam}&bg_type=${bgTypeParam}&bg_color_end=${bgEndParam}&frame=${frameParam}&style=${styleParam}&host=${encodeURIComponent(activeHost)}`;
         const jsLiveFallbackUrl = escapeJs(liveFallbackUrl);
         const jsQrImgUrl = escapeJs(qrImgUrl);
@@ -1267,8 +1268,8 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         const bgEndParam = encodeURIComponent(d.background_color_end || '');
         const frameParam = encodeURIComponent(d.frame_text || 'ESCANEIE AQUI');
         const styleParam = encodeURIComponent(d.module_style || 'rounded');
-
-        const qrImgUrl = `/preview/${encodeURIComponent(qr.slug)}.svg?host_override=${encodeURIComponent(activeHost)}&v=${qr.v || 1}&color=${fgParam}&bg_color=${bgParam}&bg_type=${bgTypeParam}&bg_color_end=${bgEndParam}&frame=${frameParam}&style=${styleParam}`;
+        const vParam = `${qr.v || 1}_${(d.foreground || '').replace('#', '')}_${(d.background || '').replace('#', '')}`;
+        const qrImgUrl = `/preview/${encodeURIComponent(qr.slug)}.svg?host_override=${encodeURIComponent(activeHost)}&v=${encodeURIComponent(vParam)}&color=${fgParam}&bg_color=${bgParam}&bg_type=${bgTypeParam}&bg_color_end=${bgEndParam}&frame=${frameParam}&style=${styleParam}`;
         const liveFallbackUrl = `/api/preview-live?slug=${encodeURIComponent(qr.slug)}&color=${fgParam}&bg_color=${bgParam}&bg_type=${bgTypeParam}&bg_color_end=${bgEndParam}&frame=${frameParam}&style=${styleParam}&host=${encodeURIComponent(activeHost)}`;
         const jsLiveFallbackUrl = escapeJs(liveFallbackUrl);
         const jsQrImgUrl = escapeJs(qrImgUrl);
@@ -1556,6 +1557,26 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       } else {
         payload.status = document.getElementById('input-status').value;
         const originalSlug = document.getElementById('qr-slug-original').value;
+        const activeHost = getActiveHost();
+        saveCustomQR({
+          slug: originalSlug,
+          name: payload.name,
+          short_url: `${window.location.protocol}//${activeHost}/${originalSlug}`,
+          default_url: payload.target_url,
+          status: payload.status,
+          v: Date.now(),
+          design: {
+            foreground: payload.foreground,
+            background: payload.background,
+            background_type: payload.background_type,
+            background_color_end: payload.background_color_end,
+            module_style: payload.module_style,
+            finder_style: payload.module_style === 'rounded' ? 'rounded' : 'square',
+            frame_text: payload.frame_text
+          },
+          rules: [],
+          created_at: new Date().toISOString()
+        });
         const res = await fetch(`/api/qrcodes/${encodeURIComponent(originalSlug)}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
@@ -1664,11 +1685,11 @@ async def list_qrcodes_api(
             stored_slugs = await redis_async.smembers("all_qr_slugs")
             for s in stored_slugs:
                 if s in DELETED_SLUGS:
+                    IN_MEMORY_DB.pop(s, None)
                     continue
-                if s not in IN_MEMORY_DB:
-                    meta = await redis_async.get(f"qr_meta:{s}")
-                    if meta:
-                        IN_MEMORY_DB[s] = json.loads(meta)
+                meta = await redis_async.get(f"qr_meta:{s}")
+                if meta:
+                    IN_MEMORY_DB[s] = json.loads(meta)
         except Exception as exc:
             log.warning("Falha ao sincronizar lista com Redis: %r", exc)
 
@@ -2017,7 +2038,7 @@ async def preview_svg(
     clean_slug = slug.strip().lstrip("/").lower()
     active_host = host_override or request.headers.get("host", "localhost")
 
-    if clean_slug not in IN_MEMORY_DB and REDIS_URL:
+    if REDIS_URL:
         try:
             meta = await redis_async.get(f"qr_meta:{clean_slug}")
             if meta:
@@ -2028,17 +2049,15 @@ async def preview_svg(
     payload = IN_MEMORY_DB.get(clean_slug)
     if payload:
         design_data = payload.get("design", {})
-        fg_col = color or design_data.get("foreground", "#0F172A")
-        bg_col = bg_color or design_data.get("background", "#FFFFFF")
-        bg_t = bg_type or design_data.get("background_type", "solid")
-        bg_end = bg_color_end or design_data.get("background_color_end")
-        m_style = style or design_data.get("module_style", "rounded")
+        fg_col = design_data.get("foreground", "#0F172A")
+        bg_col = design_data.get("background", "#FFFFFF")
+        bg_t = design_data.get("background_type", "solid")
+        bg_end = design_data.get("background_color_end")
+        m_style = design_data.get("module_style", "rounded")
         f_style = design_data.get("finder_style", "rounded" if m_style == "rounded" else "square")
-        f_text = frame or design_data.get("frame_text", "ESCANEIE AQUI")
+        f_text = design_data.get("frame_text", "ESCANEIE AQUI")
     else:
-        # Fallback resiliente para serverless / lambdas sem estado / cold starts:
-        # Gera o QR Code com base nos parâmetros da requisição ou defaults elegantes,
-        # garantindo que o usuário NUNCA veja um ícone de imagem quebrada.
+        # Fallback apenas para slugs não encontrados no banco
         fg_col = color or "#0F172A"
         bg_col = bg_color or "#FFFFFF"
         bg_t = bg_type or ("gradient" if bg_color_end else "solid")
@@ -2121,7 +2140,7 @@ async def export_qr(
     clean_slug = slug.strip().lstrip("/").lower()
     active_host = host_override or request.headers.get("host", "localhost")
 
-    if clean_slug not in IN_MEMORY_DB and REDIS_URL:
+    if REDIS_URL:
         try:
             meta = await redis_async.get(f"qr_meta:{clean_slug}")
             if meta:
@@ -2132,13 +2151,13 @@ async def export_qr(
     payload = IN_MEMORY_DB.get(clean_slug)
     if payload:
         design_data = payload.get("design", {})
-        fg_col = color or design_data.get("foreground", "#0F172A")
-        bg_col = bg_color or design_data.get("background", "#FFFFFF")
-        bg_t = bg_type or design_data.get("background_type", "solid")
-        bg_end = bg_color_end or design_data.get("background_color_end")
-        m_style = style or design_data.get("module_style", "rounded")
+        fg_col = design_data.get("foreground", "#0F172A")
+        bg_col = design_data.get("background", "#FFFFFF")
+        bg_t = design_data.get("background_type", "solid")
+        bg_end = design_data.get("background_color_end")
+        m_style = design_data.get("module_style", "rounded")
         f_style = design_data.get("finder_style", "rounded" if m_style == "rounded" else "square")
-        f_text = frame or design_data.get("frame_text", "ESCANEIE AQUI")
+        f_text = design_data.get("frame_text", "ESCANEIE AQUI")
     else:
         fg_col = color or "#0F172A"
         bg_col = bg_color or "#FFFFFF"
