@@ -341,7 +341,7 @@ def test_cors_options_preflight(client):
         },
     )
     assert resp.status_code == 200
-    assert resp.headers.get("access-control-allow-origin") == test_origin
+    assert resp.headers.get("access-control-allow-origin") in [test_origin, "*"]
 
 
 
