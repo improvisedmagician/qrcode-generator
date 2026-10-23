@@ -893,62 +893,18 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     let todosQRs = [];
     let filtroAtualStatus = 'all';
 
-    // Limpeza de tombstones locais obsoletos: confiamos no banco central Redis
+    // Purga definitiva de caches e dados zumbis de versoes legadas: o Redis online e a unica fonte da verdade
     try {
+      localStorage.removeItem('custom_qrcodes');
       localStorage.removeItem('deleted_qr_slugs');
     } catch (e) {}
 
-    function getDeletedSlugs() {
-      try {
-        return JSON.parse(localStorage.getItem('deleted_qr_slugs') || '[]');
-      } catch (e) {
-        return [];
-      }
-    }
-
-    function addDeletedSlug(slug) {
-      try {
-        const list = getDeletedSlugs();
-        const clean = String(slug).toLowerCase().trim();
-        if (!list.includes(clean)) {
-          list.push(clean);
-          localStorage.setItem('deleted_qr_slugs', JSON.stringify(list));
-        }
-      } catch (e) {}
-    }
-
-    function removeDeletedSlug(slug) {
-      try {
-        const list = getDeletedSlugs();
-        const clean = String(slug).toLowerCase().trim();
-        const filtered = list.filter(s => s !== clean);
-        localStorage.setItem('deleted_qr_slugs', JSON.stringify(filtered));
-      } catch (e) {}
-    }
-
-    function getCustomQRs() {
-      try {
-        return JSON.parse(localStorage.getItem('custom_qrcodes') || '{}');
-      } catch (e) {
-        return {};
-      }
-    }
-
-    function saveCustomQR(qr) {
-      try {
-        const all = getCustomQRs();
-        all[String(qr.slug).toLowerCase().trim()] = qr;
-        localStorage.setItem('custom_qrcodes', JSON.stringify(all));
-      } catch (e) {}
-    }
-
-    function deleteCustomQR(slug) {
-      try {
-        const all = getCustomQRs();
-        delete all[String(slug).toLowerCase().trim()];
-        localStorage.setItem('custom_qrcodes', JSON.stringify(all));
-      } catch (e) {}
-    }
+    function getDeletedSlugs() { return []; }
+    function addDeletedSlug() {}
+    function removeDeletedSlug() {}
+    function getCustomQRs() { return {}; }
+    function saveCustomQR() {}
+    function deleteCustomQR() {}
 
     function escapeHtml(str) {
       if (str === null || str === undefined) return '';
@@ -1156,46 +1112,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
           mergedClicks[k] = Math.max(mergedClicks[k] || 0, Number(v) || 0);
         }
         saveStoredClicks(mergedClicks);
-
-        const deletedSet = new Set(getDeletedSlugs().map(s => String(s).toLowerCase().trim()));
-        const customQRs = Object.values(getCustomQRs()).filter(q => !deletedSet.has(String(q.slug).toLowerCase().trim()));
-        const qrsMap = new Map();
-
-        (Array.isArray(serverQRs) ? serverQRs : []).forEach(q => {
-          const k = String(q.slug).toLowerCase().trim();
-          if (!deletedSet.has(k)) {
-            qrsMap.set(k, q);
-            saveCustomQR(q);
-          } else {
-            deleteCustomQR(k);
-          }
-        });
-
-        customQRs.forEach(q => {
-          const k = String(q.slug).toLowerCase().trim();
-          if (!deletedSet.has(k) && !qrsMap.has(k)) {
-            qrsMap.set(k, q);
-            // Re-sincroniza silenciosamente apenas se o código for válido e não tiver sido excluído
-            fetch('/api/qrcodes', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                name: q.name,
-                slug: q.slug,
-                target_url: q.default_url,
-                foreground: (q.design && q.design.foreground) || '#0F172A',
-                background: (q.design && q.design.background) || '#FFFFFF',
-                background_type: (q.design && q.design.background_type) || 'solid',
-                background_color_end: q.design && q.design.background_color_end,
-                frame_text: (q.design && q.design.frame_text) || 'ESCANEIE AQUI',
-                module_style: (q.design && q.design.module_style) || 'rounded',
-                status: q.status || 'active'
-              })
-            }).catch(() => {});
-          }
-        });
-
-        todosQRs = Array.from(qrsMap.values()).map(q => {
+        todosQRs = (Array.isArray(serverQRs) ? serverQRs : []).map(q => {
           const k = String(q.slug).toLowerCase().trim();
           const clicks = Math.max(mergedClicks[k] || 0, Number(q.clicks) || 0);
           return { ...q, clicks };
@@ -1782,27 +1699,6 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 
       if (modo === 'criar') {
         payload.slug = slug;
-        removeDeletedSlug(slug);
-        const activeHost = getActiveHost();
-        saveCustomQR({
-          slug: slug,
-          name: payload.name,
-          short_url: `${window.location.protocol}//${activeHost}/${slug}`,
-          default_url: payload.target_url,
-          status: 'active',
-          v: 1,
-          design: {
-            foreground: payload.foreground,
-            background: payload.background,
-            background_type: payload.background_type,
-            background_color_end: payload.background_color_end,
-            module_style: payload.module_style,
-            finder_style: payload.module_style === 'rounded' ? 'rounded' : 'square',
-            frame_text: payload.frame_text
-          },
-          rules: [],
-          created_at: new Date().toISOString()
-        });
         const res = await fetch('/api/qrcodes', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1811,7 +1707,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         if (res.ok) {
           fecharModal();
           showToast(`QR Code /${slug} criado com sucesso!`);
-          carregarDashboard();
+          await carregarDashboard();
         } else {
           const err = await res.json();
           alert('Erro: ' + (err.detail || 'Falha ao criar QR Code'));
@@ -1819,26 +1715,6 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       } else {
         payload.status = document.getElementById('input-status').value;
         const originalSlug = document.getElementById('qr-slug-original').value;
-        const activeHost = getActiveHost();
-        saveCustomQR({
-          slug: originalSlug,
-          name: payload.name,
-          short_url: `${window.location.protocol}//${activeHost}/${originalSlug}`,
-          default_url: payload.target_url,
-          status: payload.status,
-          v: Date.now(),
-          design: {
-            foreground: payload.foreground,
-            background: payload.background,
-            background_type: payload.background_type,
-            background_color_end: payload.background_color_end,
-            module_style: payload.module_style,
-            finder_style: payload.module_style === 'rounded' ? 'rounded' : 'square',
-            frame_text: payload.frame_text
-          },
-          rules: [],
-          created_at: new Date().toISOString()
-        });
         const res = await fetch(`/api/qrcodes/${encodeURIComponent(originalSlug)}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
@@ -1846,8 +1722,8 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         });
         if (res.ok) {
           fecharModal();
-          showToast(`QR Code /${originalSlug} atualizado no Redis!`);
-          carregarDashboard();
+          showToast(`QR Code /${originalSlug} atualizado com sucesso!`);
+          await carregarDashboard();
         } else {
           const err = await res.json();
           alert('Erro: ' + (err.detail || 'Falha ao atualizar QR Code'));
@@ -1860,17 +1736,19 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       if (!confirm(`Tem certeza que deseja excluir o QR Code "${nome}" (/${cleanSlug})?\n\nO link deixará de redirecionar imediatamente.`)) {
         return;
       }
-      addDeletedSlug(cleanSlug);
-      deleteCustomQR(cleanSlug);
       todosQRs = todosQRs.filter(q => String(q.slug).toLowerCase().trim() !== cleanSlug);
       filtrarQRs();
 
       try {
-        await fetch(`/api/qrcodes/${encodeURIComponent(cleanSlug)}`, {
+        const res = await fetch(`/api/qrcodes/${encodeURIComponent(cleanSlug)}`, {
           method: 'DELETE',
           headers: { 'Accept': 'application/json' }
         });
-        showToast(`QR Code /${cleanSlug} excluído com sucesso!`, 'fa-trash-can text-rose-400');
+        if (res.ok) {
+          showToast(`QR Code /${cleanSlug} excluído com sucesso!`, 'fa-trash-can text-rose-400');
+        } else {
+          showToast(`QR Code /${cleanSlug} excluído.`, 'fa-trash-can text-rose-400');
+        }
       } catch (err) {
         showToast(`QR Code /${cleanSlug} excluído.`, 'fa-trash-can text-rose-400');
       }
@@ -1885,9 +1763,8 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         const defaultSlugs = ['promo', 'blackfriday', 'insta', 'jogos205'];
         const currentSlugs = todosQRs.map(q => String(q.slug).toLowerCase().trim());
         const allSlugs = Array.from(new Set([...defaultSlugs, ...currentSlugs]));
-        allSlugs.forEach(s => addDeletedSlug(s));
-        
         localStorage.removeItem('custom_qrcodes');
+        localStorage.removeItem('deleted_qr_slugs');
         localStorage.removeItem('cached_scans');
         localStorage.removeItem('qr_clicks');
         lastRenderedScansJson = '';
