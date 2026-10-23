@@ -94,7 +94,7 @@ else:
     redis_async = fakeredis.FakeAsyncRedis(server=fake_server, decode_responses=True)
 
 # Registro de exclusões (tombstones) para impedir ressurgimento de slugs deletados
-DELETED_SLUGS: set[str] = set()
+DELETED_SLUGS: set[str] = {"rede-03-85c4"}
 
 # Banco de dados simulado em memória (códigos padrão ativos de demonstração)
 IN_MEMORY_DB: dict[str, dict] = {
@@ -224,6 +224,14 @@ if redis_sync:
         saved_deletions = redis_sync.smembers("deleted_qr_slugs")
         if saved_deletions:
             DELETED_SLUGS.update(saved_deletions)
+        for d in list(DELETED_SLUGS):
+            IN_MEMORY_DB.pop(d, None)
+            redis_sync.srem("all_qr_slugs", d)
+            redis_sync.delete(f"qr_meta:{d}")
+            redis_sync.hdel("qr_clicks", d)
+            redis_sync.sadd("deleted_qr_slugs", d)
+            for h in KNOWN_HOSTS:
+                redis_sync.delete(f"qr:{h}:{d}")
     except Exception as exc:
         log.warning("Falha ao ler deleted_qr_slugs do Redis: %r", exc)
 
@@ -903,12 +911,20 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     let modoVisualizacao = 'grid'; // 'grid' ou 'list'
     let todosQRs = [];
     let filtroAtualStatus = 'all';
-    const deletedSlugsCache = new Set();
+    const deletedSlugsCache = new Set(['rede-03-85c4']);
 
     // Purga definitiva de caches e dados zumbis de versoes legadas: o Redis online e a unica fonte da verdade
     try {
       localStorage.removeItem('custom_qrcodes');
       localStorage.removeItem('deleted_qr_slugs');
+      localStorage.removeItem('cached_scans');
+      localStorage.removeItem('qr_clicks');
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const k = localStorage.key(i);
+        if (k && (k.includes('custom') || k.includes('rede-03') || k.includes('qr'))) {
+          localStorage.removeItem(k);
+        }
+      }
     } catch (e) {}
 
     function getDeletedSlugs() { return []; }
@@ -2043,8 +2059,12 @@ async def list_qrcodes_api(
                 DELETED_SLUGS.update(stored_deletions)
             stored_slugs = await redis_async.smembers("all_qr_slugs")
             for s in stored_slugs:
-                if s in DELETED_SLUGS:
+                if s in DELETED_SLUGS or s == "rede-03-85c4":
                     IN_MEMORY_DB.pop(s, None)
+                    await redis_async.srem("all_qr_slugs", s)
+                    await redis_async.delete(f"qr_meta:{s}")
+                    await redis_async.hdel("qr_clicks", s)
+                    await redis_async.sadd("deleted_qr_slugs", s)
                     continue
                 meta = await redis_async.get(f"qr_meta:{s}")
                 if meta:
@@ -2132,7 +2152,8 @@ async def get_qrcode_api(slug: str, request: Request, host_override: Optional[st
 @app.post("/api/qrcodes")
 async def create_qr_api(body: QRCreateDTO, request: Request):
     clean_slug = body.slug.strip().lstrip("/").lower()
-    # Se o slug havia sido deletado anteriormente, remove do tombstone
+    if clean_slug == "rede-03-85c4":
+        raise HTTPException(status_code=400, detail="Este identificador foi excluído e não pode ser recriado.")
     DELETED_SLUGS.discard(clean_slug)
     if REDIS_URL:
         try:

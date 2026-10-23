@@ -7,12 +7,7 @@
       "entrypoint": "main:app"
     }
   },
-  "crons": [
-    {
-      "path": "/api/health",
-      "schedule": "*/10 * * * *"
-    }
-  ],
+
   "rewrites": [
     {
       "source": "/(.*)",
