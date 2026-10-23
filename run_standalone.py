@@ -1157,20 +1157,25 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         }
         saveStoredClicks(mergedClicks);
 
-        const customQRs = Object.values(getCustomQRs());
+        const deletedSet = new Set(getDeletedSlugs().map(s => String(s).toLowerCase().trim()));
+        const customQRs = Object.values(getCustomQRs()).filter(q => !deletedSet.has(String(q.slug).toLowerCase().trim()));
         const qrsMap = new Map();
 
         (Array.isArray(serverQRs) ? serverQRs : []).forEach(q => {
           const k = String(q.slug).toLowerCase().trim();
-          qrsMap.set(k, q);
-          saveCustomQR(q);
+          if (!deletedSet.has(k)) {
+            qrsMap.set(k, q);
+            saveCustomQR(q);
+          } else {
+            deleteCustomQR(k);
+          }
         });
 
         customQRs.forEach(q => {
           const k = String(q.slug).toLowerCase().trim();
-          if (!qrsMap.has(k)) {
+          if (!deletedSet.has(k) && !qrsMap.has(k)) {
             qrsMap.set(k, q);
-            // Re-sincroniza silenciosamente com o backend se a instância tiver reiniciado
+            // Re-sincroniza silenciosamente apenas se o código for válido e não tiver sido excluído
             fetch('/api/qrcodes', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -1851,23 +1856,25 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     }
 
     async function deletarQRCode(slug, nome) {
-      if (confirm(`Tem certeza que deseja excluir o QR Code "${nome}" (/${slug})?\n\nO link deixará de redirecionar imediatamente.`)) {
-        addDeletedSlug(slug);
-        deleteCustomQR(slug);
-        todosQRs = todosQRs.filter(q => String(q.slug).toLowerCase().trim() !== String(slug).toLowerCase().trim());
-        filtrarQRs();
-
-        try {
-          await fetch(`/api/qrcodes/${encodeURIComponent(slug)}`, {
-            method: 'DELETE',
-            headers: { 'Accept': 'application/json' }
-          });
-          showToast(`QR Code /${slug} excluído com sucesso!`, 'fa-trash-can text-rose-400');
-        } catch (err) {
-          showToast(`QR Code /${slug} excluído.`, 'fa-trash-can text-rose-400');
-        }
-        await carregarDashboard();
+      const cleanSlug = String(slug).toLowerCase().trim();
+      if (!confirm(`Tem certeza que deseja excluir o QR Code "${nome}" (/${cleanSlug})?\n\nO link deixará de redirecionar imediatamente.`)) {
+        return;
       }
+      addDeletedSlug(cleanSlug);
+      deleteCustomQR(cleanSlug);
+      todosQRs = todosQRs.filter(q => String(q.slug).toLowerCase().trim() !== cleanSlug);
+      filtrarQRs();
+
+      try {
+        await fetch(`/api/qrcodes/${encodeURIComponent(cleanSlug)}`, {
+          method: 'DELETE',
+          headers: { 'Accept': 'application/json' }
+        });
+        showToast(`QR Code /${cleanSlug} excluído com sucesso!`, 'fa-trash-can text-rose-400');
+      } catch (err) {
+        showToast(`QR Code /${cleanSlug} excluído.`, 'fa-trash-can text-rose-400');
+      }
+      await carregarDashboard();
     }
 
     async function limparTudo() {
@@ -1875,23 +1882,24 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         return;
       }
       try {
+        const defaultSlugs = ['promo', 'blackfriday', 'insta', 'jogos205'];
+        const currentSlugs = todosQRs.map(q => String(q.slug).toLowerCase().trim());
+        const allSlugs = Array.from(new Set([...defaultSlugs, ...currentSlugs]));
+        allSlugs.forEach(s => addDeletedSlug(s));
+        
         localStorage.removeItem('custom_qrcodes');
-        localStorage.removeItem('deleted_qr_slugs');
         localStorage.removeItem('cached_scans');
         localStorage.removeItem('qr_clicks');
         lastRenderedScansJson = '';
-        const defaultSlugs = ['promo', 'blackfriday', 'insta', 'jogos205'];
-        const currentSlugs = todosQRs.map(q => q.slug);
-        const allSlugs = Array.from(new Set([...defaultSlugs, ...currentSlugs]));
-        allSlugs.forEach(s => addDeletedSlug(s));
-
-        await Promise.allSettled(
-          allSlugs.map(s =>
-            fetch(`/api/qrcodes/${encodeURIComponent(s)}`, { method: 'DELETE' })
-          )
-        );
         todosQRs = [];
         filtrarQRs();
+
+        // Limpa no servidor via endpoint unificado e por slug
+        await fetch('/api/qrcodes/clear-all', { method: 'POST' }).catch(() => {});
+        await Promise.allSettled(
+          allSlugs.map(s => fetch(`/api/qrcodes/${encodeURIComponent(s)}`, { method: 'DELETE' }))
+        );
+
         showToast('Painel limpo com sucesso!', 'fa-trash-can text-rose-400');
         await carregarDashboard();
       } catch (err) {
@@ -2090,6 +2098,24 @@ PAUSED_HTML = """<!DOCTYPE html>
 # =====================================================================
 # ENDPOINTS REST DA API (CRUD COMPLETO COM SUPORTE MULTI-HOST)
 # =====================================================================
+@app.get("/api/health")
+async def health_check():
+    redis_status = "offline"
+    if redis_async:
+        try:
+            pong = await redis_async.ping()
+            if pong:
+                redis_status = "connected"
+        except Exception as exc:
+            redis_status = f"error: {exc}"
+    return {
+        "status": "healthy",
+        "redis": redis_status,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "total_active_qrs": len([k for k in IN_MEMORY_DB.keys() if k not in DELETED_SLUGS]),
+    }
+
+
 @app.get("/api/qrcodes")
 async def list_qrcodes_api(
     request: Request,
@@ -2097,7 +2123,7 @@ async def list_qrcodes_api(
     status: Optional[str] = None,
     host_override: Optional[str] = None,
 ):
-    if REDIS_URL:
+    if redis_async:
         try:
             stored_deletions = await redis_async.smembers("deleted_qr_slugs")
             if stored_deletions:
@@ -2113,8 +2139,12 @@ async def list_qrcodes_api(
         except Exception as exc:
             log.warning("Falha ao sincronizar lista com Redis: %r", exc)
 
+    # Garante purga imediata de quaisquer slugs excluídos
+    for d in list(DELETED_SLUGS):
+        IN_MEMORY_DB.pop(d, None)
+
     clicks_map = dict(SCAN_COUNTS)
-    if REDIS_URL and redis_async:
+    if redis_async:
         try:
             stored_clicks = await redis_async.hgetall("qr_clicks")
             if stored_clicks:
@@ -2405,8 +2435,58 @@ async def delete_qr_api(slug: str, request: Request):
     except Exception as exc:
         log.warning("Sincronização Redis offline ou ignorada durante exclusão: %r", exc)
 
+    if redis_sync:
+        try:
+            redis_sync.sadd("deleted_qr_slugs", clean_slug)
+            redis_sync.srem("all_qr_slugs", clean_slug)
+            redis_sync.delete(f"qr_meta:{clean_slug}")
+            redis_sync.hdel("qr_clicks", clean_slug)
+            for h in hosts_to_sync:
+                if h:
+                    redis_sync.delete(f"qr:{h}:{clean_slug}")
+        except Exception:
+            pass
+
     # Operação 100% idempotente (RFC 7231 / 9110)
     return {"status": "deleted", "slug": clean_slug}
+
+
+@app.post("/api/qrcodes/clear-all")
+async def clear_all_qrcodes_api(request: Request):
+    current_host = request.headers.get("host", "").split(":")[0].lower()
+    hosts_to_sync = set(KNOWN_HOSTS + [current_host])
+    all_slugs = set(list(IN_MEMORY_DB.keys()))
+    if redis_async:
+        try:
+            stored = await redis_async.smembers("all_qr_slugs")
+            if stored:
+                all_slugs.update(stored)
+        except Exception:
+            pass
+
+    for s in list(all_slugs):
+        clean = s.strip().lstrip("/").lower()
+        DELETED_SLUGS.add(clean)
+        IN_MEMORY_DB.pop(clean, None)
+        SCAN_COUNTS.pop(clean, None)
+        for h in hosts_to_sync:
+            if h:
+                resolver.invalidate(f"qr:{h}:{clean}")
+
+    if redis_async:
+        try:
+            for clean in all_slugs:
+                await redis_async.sadd("deleted_qr_slugs", clean)
+                await redis_async.srem("all_qr_slugs", clean)
+                await redis_async.delete(f"qr_meta:{clean}")
+                for h in hosts_to_sync:
+                    if h:
+                        await redis_async.delete(f"qr:{h}:{clean}")
+        except Exception as exc:
+            log.warning("Falha ao limpar tudo no Redis: %r", exc)
+
+    save_local_db()
+    return {"status": "cleared", "total": len(all_slugs)}
 
 
 @app.post("/api/qrcodes/batch")

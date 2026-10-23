@@ -592,6 +592,27 @@ def test_form_encoded_activation(client):
     assert resp_redir.headers["location"].startswith("https://pizzaria.com.br")
 
 
+def test_health_check_and_clear_all(client):
+    # 1. Health check
+    resp_health = client.get("/api/health")
+    assert resp_health.status_code == 200
+    data = resp_health.json()
+    assert data["status"] == "healthy"
+    assert "redis" in data
+    assert "timestamp" in data
+
+    # 2. Clear all
+    resp_clear = client.post("/api/qrcodes/clear-all")
+    assert resp_clear.status_code == 200
+    assert resp_clear.json()["status"] == "cleared"
+
+    # Listagem deve estar vazia após clear-all
+    resp_list = client.get("/api/qrcodes")
+    assert resp_list.status_code == 200
+    assert len(resp_list.json()) == 0
+
+
+
 
 
 
