@@ -574,6 +574,25 @@ def test_batch_export_pdf_and_csv(client):
     assert "promo" in csv_text
 
 
+def test_form_encoded_activation(client):
+    # Cria slug virgem
+    client.post("/api/qrcodes", json={"name": "Virgem Form", "slug": "slug-form-test", "target_url": ""})
+
+    # Submissão via formulário HTML clássico (application/x-www-form-urlencoded) sem python-multipart
+    resp = client.post(
+        "/api/qrcodes/slug-form-test/activate",
+        data={"target_url": "https://pizzaria.com.br", "name": "Pizzaria Nome Atualizado"},
+    )
+    assert resp.status_code == 200
+    assert "QR Code Ativado com Sucesso!" in resp.text
+
+    # Verifica redirecionamento
+    resp_redir = client.get("/slug-form-test", follow_redirects=False)
+    assert resp_redir.status_code == 302
+    assert resp_redir.headers["location"].startswith("https://pizzaria.com.br")
+
+
+
 
 
 

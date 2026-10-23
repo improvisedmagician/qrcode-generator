@@ -8,3 +8,4 @@ redis>=5.2.0
 fakeredis>=2.26.0
 cachetools>=5.5.0
 user-agents>=2.2.0
+python-multipart>=0.0.12

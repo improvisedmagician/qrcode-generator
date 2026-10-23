@@ -1953,13 +1953,14 @@ ACTIVATION_HTML = """<!DOCTYPE html>
         Este código impresso ainda não possui um link associado. Digite o endereço final para ativá-lo agora mesmo.
       </p>
 
-      <form action="/api/qrcodes/{slug}/activate" method="POST" class="text-left space-y-3.5">
+      <form id="form-ativar" action="/api/qrcodes/{slug}/activate" method="POST" class="text-left space-y-3.5">
         <div>
           <label class="block text-xs font-semibold text-zinc-300 mb-1">Link de Destino Final</label>
           <div class="relative">
             <input 
               type="text" 
               name="target_url" 
+              id="input-target-url"
               placeholder="https://instagram.com/sua_loja ou seu site" 
               required
               class="w-full px-3.5 py-3 bg-zinc-800/80 border border-zinc-700 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition font-mono"
@@ -1973,14 +1974,18 @@ ACTIVATION_HTML = """<!DOCTYPE html>
           <input 
             type="text" 
             name="name" 
+            id="input-name"
             value="{qr_name}"
             placeholder="Ex: Cardápio Mesa 01" 
             class="w-full px-3.5 py-2.5 bg-zinc-800/80 border border-zinc-700 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500 transition"
           />
         </div>
 
+        <div id="erro-msg" class="hidden p-3 bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs rounded-xl font-medium leading-relaxed"></div>
+
         <button 
           type="submit" 
+          id="btn-ativar"
           class="w-full mt-2 py-3 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-zinc-950 font-bold rounded-xl text-xs sm:text-sm transition duration-150 shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 cursor-pointer active:scale-98"
         >
           <span>Salvar & Ativar QR Code</span>
@@ -1996,6 +2001,56 @@ ACTIVATION_HTML = """<!DOCTYPE html>
       </div>
     </div>
   </div>
+
+  <script>
+    document.getElementById('form-ativar').addEventListener('submit', async function(e) {{
+      e.preventDefault();
+      const btn = document.getElementById('btn-ativar');
+      const errBox = document.getElementById('erro-msg');
+      errBox.classList.add('hidden');
+      
+      const targetUrl = document.getElementById('input-target-url').value.trim();
+      const friendlyName = document.getElementById('input-name').value.trim();
+      
+      if (!targetUrl) {{
+        errBox.innerText = 'Por favor, digite o link de destino.';
+        errBox.classList.remove('hidden');
+        return;
+      }}
+      
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i><span>Ativando QR Code...</span>';
+      
+      try {{
+        const resp = await fetch('/api/qrcodes/{slug}/activate', {{
+          method: 'POST',
+          headers: {{
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          }},
+          body: JSON.stringify({{ target_url: targetUrl, name: friendlyName }})
+        }});
+        
+        const data = await resp.json().catch(() => ({{}}));
+        if (resp.ok) {{
+          btn.classList.remove('from-emerald-500', 'to-teal-400', 'hover:from-emerald-400');
+          btn.classList.add('bg-emerald-500');
+          btn.innerHTML = '<span>✓ Ativado com Sucesso! Redirecionando...</span>';
+          setTimeout(() => {{
+            window.location.href = data.target_url || targetUrl;
+          }}, 800);
+        }} else {{
+          btn.disabled = false;
+          btn.innerHTML = '<span>Salvar & Ativar QR Code</span><i class="fa-solid fa-arrow-right text-xs ml-2"></i>';
+          errBox.innerText = data.detail || 'Ocorreu um erro ao salvar o link. Verifique se o endereço é válido.';
+          errBox.classList.remove('hidden');
+        }}
+      }} catch (err) {{
+        // Fallback para submit de formulário clássico
+        e.target.submit();
+      }}
+    }});
+  </script>
 </body>
 </html>"""
 
@@ -2231,14 +2286,15 @@ async def update_qr_api(slug: str, body: QRUpdateDTO, request: Request):
     if clean_slug in DELETED_SLUGS:
         raise HTTPException(status_code=404, detail="QR Code não encontrado")
 
-    if clean_slug not in IN_MEMORY_DB and REDIS_URL:
+    if clean_slug not in IN_MEMORY_DB:
         try:
-            if await redis_async.sismember("deleted_qr_slugs", clean_slug):
-                DELETED_SLUGS.add(clean_slug)
-                raise HTTPException(status_code=404, detail="QR Code não encontrado")
-            cached = await redis_async.get(f"qr_meta:{clean_slug}")
-            if cached:
-                IN_MEMORY_DB[clean_slug] = json.loads(cached)
+            if redis_async:
+                if await redis_async.sismember("deleted_qr_slugs", clean_slug):
+                    DELETED_SLUGS.add(clean_slug)
+                    raise HTTPException(status_code=404, detail="QR Code não encontrado")
+                cached = await redis_async.get(f"qr_meta:{clean_slug}")
+                if cached:
+                    IN_MEMORY_DB[clean_slug] = json.loads(cached)
         except HTTPException:
             raise
         except Exception:
@@ -2403,6 +2459,20 @@ async def create_batch_qr_api(body: QRBatchCreateDTO, request: Request):
         }
         IN_MEMORY_DB[slug] = payload
         sync_redis_slug(slug, payload)
+        payload_str = json.dumps(payload)
+        hosts_to_sync = set(KNOWN_HOSTS + [current_host])
+        for h in hosts_to_sync:
+            if h:
+                resolver.invalidate(f"qr:{h}:{slug}")
+        if redis_async:
+            try:
+                for h in hosts_to_sync:
+                    if h:
+                        await redis_async.set(f"qr:{h}:{slug}", payload_str, ex=86400)
+                await redis_async.sadd("all_qr_slugs", slug)
+                await redis_async.set(f"qr_meta:{slug}", payload_str)
+            except Exception as exc:
+                log.warning("Falha ao sincronizar lote no Redis async: %r", exc)
         created.append({
             "slug": slug,
             "name": payload["name"],
@@ -2429,9 +2499,14 @@ async def activate_qr_api(slug: str, request: Request):
         except Exception:
             pass
     else:
-        form = await request.form()
-        target_url = form.get("target_url") or form.get("url") or ""
-        friendly_name = form.get("name")
+        try:
+            raw_body = await request.body()
+            from urllib.parse import parse_qs
+            parsed = parse_qs(raw_body.decode("utf-8", errors="replace"))
+            target_url = (parsed.get("target_url") or parsed.get("url") or [""])[0]
+            friendly_name = (parsed.get("name") or [None])[0]
+        except Exception:
+            pass
 
     target = re.sub(r"[\r\n\t]", "", str(target_url).strip())
     if not target:
@@ -2449,11 +2524,12 @@ async def activate_qr_api(slug: str, request: Request):
     if target_host in ("localhost", "127.0.0.1", "0.0.0.0", LAN_IP.lower()) and target_path == clean_slug:
         raise HTTPException(status_code=422, detail="Destino não pode apontar para o próprio código.")
 
-    if clean_slug not in IN_MEMORY_DB and REDIS_URL:
+    if clean_slug not in IN_MEMORY_DB:
         try:
-            meta = await redis_async.get(f"qr_meta:{clean_slug}")
-            if meta:
-                IN_MEMORY_DB[clean_slug] = json.loads(meta)
+            if redis_async:
+                meta = await redis_async.get(f"qr_meta:{clean_slug}")
+                if meta:
+                    IN_MEMORY_DB[clean_slug] = json.loads(meta)
         except Exception:
             pass
 
