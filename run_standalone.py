@@ -31,7 +31,7 @@ from urllib.parse import urlsplit
 import fakeredis
 import redis.asyncio as aioredis
 from fastapi import FastAPI, HTTPException, Query, Request, Response
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
 from services.api.app.qr_render import InvalidDesign, QRDesign, render, validate, verify_readable
@@ -41,6 +41,12 @@ from services.redirect.app.main import DEEPLINK_HTML, NO_STORE
 from services.redirect.app.resolver import Resolver
 from services.redirect.app.rules import decide
 from services.analytics_worker.worker.enrich import COLUMNS, enrich
+
+CACHE_BUST_HEADERS = {
+    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    "Pragma": "no-cache",
+    "Expires": "0",
+}
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("demo")
@@ -850,7 +856,12 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 
       <!-- Modal Footer (Fixo na parte inferior) -->
       <div class="px-5 py-3 border-t border-zinc-100 flex items-center justify-between bg-zinc-50/70 shrink-0">
-        <span class="text-[10px] text-emerald-600 font-medium hidden sm:inline"><i class="fa-solid fa-check mr-1"></i>Vetor pronto para impressão gráfica</span>
+        <div>
+          <button type="button" id="btn-modal-excluir" onclick="deletarQRCodeAtualDoModal()" class="hidden px-3 py-1.5 text-xs font-semibold text-rose-600 hover:text-white hover:bg-rose-600 rounded-lg border border-rose-200 hover:border-rose-600 transition flex items-center gap-1.5 shadow-2xs">
+            <i class="fa-solid fa-trash-can"></i> Excluir QR Code
+          </button>
+          <span id="modal-footer-hint" class="text-[10px] text-emerald-600 font-medium hidden sm:inline"><i class="fa-solid fa-check mr-1"></i>Vetor pronto para impressão gráfica</span>
+        </div>
         <div class="flex items-center space-x-2 ml-auto">
           <button type="button" onclick="fecharModal()" class="px-3 py-1.5 text-xs font-semibold text-zinc-600 hover:bg-zinc-200/60 rounded-lg transition">Cancelar</button>
           <button type="button" onclick="document.getElementById('form-qr').requestSubmit()" id="btn-submit" class="px-4 py-1.5 text-xs font-semibold text-white bg-zinc-900 hover:bg-zinc-800 rounded-lg shadow-xs transition active:scale-95">Salvar QR Code Estático</button>
@@ -892,6 +903,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     let modoVisualizacao = 'grid'; // 'grid' ou 'list'
     let todosQRs = [];
     let filtroAtualStatus = 'all';
+    const deletedSlugsCache = new Set();
 
     // Purga definitiva de caches e dados zumbis de versoes legadas: o Redis online e a unica fonte da verdade
     try {
@@ -905,6 +917,14 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     function getCustomQRs() { return {}; }
     function saveCustomQR() {}
     function deleteCustomQR() {}
+
+    function deletarQRCodeAtualDoModal() {
+      const slug = document.getElementById('qr-slug-original').value || document.getElementById('input-slug').value;
+      const nome = document.getElementById('input-nome').value || slug;
+      if (slug) {
+        deletarQRCode(slug, nome);
+      }
+    }
 
     function escapeHtml(str) {
       if (str === null || str === undefined) return '';
@@ -1097,9 +1117,10 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     async function carregarDashboard() {
       try {
         const activeHost = getActiveHost();
+        const ts = Date.now();
         const [resQRs, resScans] = await Promise.all([
-          fetch(`/api/qrcodes?host_override=${encodeURIComponent(activeHost)}`),
-          fetch('/scans')
+          fetch(`/api/qrcodes?host_override=${encodeURIComponent(activeHost)}&_t=${ts}`, { cache: 'no-store' }),
+          fetch(`/scans?_t=${ts}`, { cache: 'no-store' })
         ]);
         const serverQRs = await resQRs.json();
         const scansData = await resScans.json();
@@ -1112,11 +1133,13 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
           mergedClicks[k] = Math.max(mergedClicks[k] || 0, Number(v) || 0);
         }
         saveStoredClicks(mergedClicks);
-        todosQRs = (Array.isArray(serverQRs) ? serverQRs : []).map(q => {
-          const k = String(q.slug).toLowerCase().trim();
-          const clicks = Math.max(mergedClicks[k] || 0, Number(q.clicks) || 0);
-          return { ...q, clicks };
-        });
+        todosQRs = (Array.isArray(serverQRs) ? serverQRs : [])
+          .filter(q => !deletedSlugsCache.has(String(q.slug).toLowerCase().trim()))
+          .map(q => {
+            const k = String(q.slug).toLowerCase().trim();
+            const clicks = Math.max(mergedClicks[k] || 0, Number(q.clicks) || 0);
+            return { ...q, clicks };
+          });
 
         // Mescla scans do servidor com o cache do localStorage para estabilidade serverless
         const existingScans = getStoredScans();
@@ -1392,8 +1415,8 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
                 <a href="/export/${encodeURIComponent(qr.slug)}?format=svg&host_override=${encodeURIComponent(activeHost)}" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-zinc-100 text-zinc-700 hover:bg-zinc-200 transition" title="Baixar Vetor SVG (Gráfica)">SVG</a>
                 <a href="/export/${encodeURIComponent(qr.slug)}?format=png&size=2048&host_override=${encodeURIComponent(activeHost)}" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-zinc-100 text-zinc-700 hover:bg-zinc-200 transition" title="Baixar PNG em Alta Resolução">PNG</a>
                 <a href="/export/${encodeURIComponent(qr.slug)}?format=pdf&host_override=${encodeURIComponent(activeHost)}" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-zinc-100 text-zinc-700 hover:bg-zinc-200 transition" title="Baixar PDF Vetorial">PDF</a>
-                <button onclick="deletarQRCode('${jsSlug}', '${jsName}')" class="p-1 rounded text-rose-500 hover:bg-rose-50 transition" title="Excluir">
-                  <i class="fa-regular fa-trash-can text-xs"></i>
+                <button onclick="deletarQRCode('${jsSlug}', '${jsName}')" class="p-1 rounded text-rose-500 hover:text-white hover:bg-rose-600 border border-transparent hover:border-rose-600 transition" title="Excluir QR Code">
+                  <i class="fa-solid fa-trash-can text-xs"></i>
                 </button>
               </div>
             </div>
@@ -1477,7 +1500,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
               <a href="/export/${encodeURIComponent(qr.slug)}?format=svg&host_override=${encodeURIComponent(activeHost)}" class="text-[10px] font-bold bg-zinc-100 hover:bg-zinc-200 rounded text-zinc-700 p-1 px-1.5">SVG</a>
               <a href="/export/${encodeURIComponent(qr.slug)}?format=png&size=2048&host_override=${encodeURIComponent(activeHost)}" class="text-[10px] font-bold bg-zinc-100 hover:bg-zinc-200 rounded text-zinc-700 p-1 px-1.5">PNG</a>
               <a href="/export/${encodeURIComponent(qr.slug)}?format=pdf&host_override=${encodeURIComponent(activeHost)}" class="text-[10px] font-bold bg-zinc-100 hover:bg-zinc-200 rounded text-zinc-700 p-1 px-1.5">PDF</a>
-              <button onclick="deletarQRCode('${jsSlug}', '${jsName}')" class="p-1 text-rose-500 hover:bg-rose-50 rounded" title="Excluir"><i class="fa-regular fa-trash-can"></i></button>
+              <button onclick="deletarQRCode('${jsSlug}', '${jsName}')" class="p-1 text-rose-500 hover:text-white hover:bg-rose-600 border border-transparent hover:border-rose-600 rounded transition" title="Excluir QR Code"><i class="fa-solid fa-trash-can"></i></button>
             </div>
           </div>
         `;
@@ -1536,6 +1559,10 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       document.getElementById('select-gradiente-preset').value = "sunset";
       setModoFundo('solid');
       document.getElementById('input-frame').value = "ESCANEIE AQUI";
+      const btnExcluir = document.getElementById('btn-modal-excluir');
+      if (btnExcluir) btnExcluir.classList.add('hidden');
+      const hint = document.getElementById('modal-footer-hint');
+      if (hint) hint.classList.remove('hidden');
       document.getElementById('modal-qr').classList.remove('hidden');
       atualizarPreviewLive();
     }
@@ -1567,6 +1594,11 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         document.getElementById('input-grad-c1').value = d.background || "#FFF1EB";
         document.getElementById('input-grad-c2').value = d.background_color_end || "#ACE0F9";
       }
+
+      const btnExcluir = document.getElementById('btn-modal-excluir');
+      if (btnExcluir) btnExcluir.classList.remove('hidden');
+      const hint = document.getElementById('modal-footer-hint');
+      if (hint) hint.classList.add('hidden');
 
       document.getElementById('modal-qr').classList.remove('hidden');
       atualizarPreviewLive();
@@ -1733,24 +1765,27 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 
     async function deletarQRCode(slug, nome) {
       const cleanSlug = String(slug).toLowerCase().trim();
-      if (!confirm(`Tem certeza que deseja excluir o QR Code "${nome}" (/${cleanSlug})?\n\nO link deixará de redirecionar imediatamente.`)) {
+      const nomeExibicao = (nome && String(nome).trim()) ? String(nome).trim() : cleanSlug;
+      if (!confirm(`Tem certeza que deseja excluir o QR Code "${nomeExibicao}" (/${cleanSlug})?\n\nO link deixará de redirecionar imediatamente.`)) {
         return;
       }
+      deletedSlugsCache.add(cleanSlug);
       todosQRs = todosQRs.filter(q => String(q.slug).toLowerCase().trim() !== cleanSlug);
       filtrarQRs();
+      fecharModal();
 
       try {
-        const res = await fetch(`/api/qrcodes/${encodeURIComponent(cleanSlug)}`, {
+        const res = await fetch(`/api/qrcodes/${encodeURIComponent(cleanSlug)}?_t=${Date.now()}`, {
           method: 'DELETE',
           headers: { 'Accept': 'application/json' }
         });
         if (res.ok) {
-          showToast(`QR Code /${cleanSlug} excluído com sucesso!`, 'fa-trash-can text-rose-400');
+          showToast(`QR Code /${cleanSlug} excluído com sucesso!`, 'fa-solid fa-trash-can text-rose-400');
         } else {
-          showToast(`QR Code /${cleanSlug} excluído.`, 'fa-trash-can text-rose-400');
+          showToast(`QR Code /${cleanSlug} excluído.`, 'fa-solid fa-trash-can text-rose-400');
         }
       } catch (err) {
-        showToast(`QR Code /${cleanSlug} excluído.`, 'fa-trash-can text-rose-400');
+        showToast(`QR Code /${cleanSlug} excluído.`, 'fa-solid fa-trash-can text-rose-400');
       }
       await carregarDashboard();
     }
@@ -1763,6 +1798,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         const defaultSlugs = ['promo', 'blackfriday', 'insta', 'jogos205'];
         const currentSlugs = todosQRs.map(q => String(q.slug).toLowerCase().trim());
         const allSlugs = Array.from(new Set([...defaultSlugs, ...currentSlugs]));
+        allSlugs.forEach(s => deletedSlugsCache.add(s));
         localStorage.removeItem('custom_qrcodes');
         localStorage.removeItem('deleted_qr_slugs');
         localStorage.removeItem('cached_scans');
@@ -1806,7 +1842,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 
 @app.get("/", response_class=HTMLResponse)
 def dashboard_view():
-    return HTMLResponse(DASHBOARD_HTML)
+    return HTMLResponse(DASHBOARD_HTML, headers=CACHE_BUST_HEADERS)
 
 
 ACTIVATION_HTML = """<!DOCTYPE html>
@@ -2055,7 +2091,7 @@ async def list_qrcodes_api(
                 "created_at": payload.get("created_at"),
             }
         )
-    return result
+    return JSONResponse(result, headers=CACHE_BUST_HEADERS)
 
 
 @app.get("/api/qrcodes/{slug}")
@@ -2309,6 +2345,12 @@ async def delete_qr_api(slug: str, request: Request):
             for h in hosts_to_sync:
                 if h:
                     await redis_async.delete(f"qr:{h}:{clean_slug}")
+            try:
+                keys = await redis_async.keys(f"qr:*:{clean_slug}")
+                if keys:
+                    await redis_async.delete(*keys)
+            except Exception:
+                pass
     except Exception as exc:
         log.warning("Sincronização Redis offline ou ignorada durante exclusão: %r", exc)
 
@@ -2325,7 +2367,7 @@ async def delete_qr_api(slug: str, request: Request):
             pass
 
     # Operação 100% idempotente (RFC 7231 / 9110)
-    return {"status": "deleted", "slug": clean_slug}
+    return JSONResponse({"status": "deleted", "slug": clean_slug}, headers=CACHE_BUST_HEADERS)
 
 
 @app.post("/api/qrcodes/clear-all")
@@ -2805,23 +2847,26 @@ async def list_scans():
         except Exception:
             pass
     total_clicks = sum(clicks_map.values())
-    return {
-        "total_scans": max(total_clicks, len(CAPTURED_SCANS)),
-        "clicks_by_slug": clicks_map,
-        "recent_events": [
-            {
-                "ts": e["ts"].isoformat() if hasattr(e["ts"], "isoformat") else str(e["ts"]),
-                "slug": e["slug"],
-                "destination": e["destination_url"],
-                "device": e["device_type"],
-                "os": e["os"],
-                "browser": e["browser"],
-                "visitor_hash": e["visitor_hash"],
-                "is_bot": e["is_bot"],
-            }
-            for e in reversed(CAPTURED_SCANS[-50:])
-        ],
-    }
+    return JSONResponse(
+        {
+            "total_scans": max(total_clicks, len(CAPTURED_SCANS)),
+            "clicks_by_slug": clicks_map,
+            "recent_events": [
+                {
+                    "ts": e["ts"].isoformat() if hasattr(e["ts"], "isoformat") else str(e["ts"]),
+                    "slug": e["slug"],
+                    "destination": e["destination_url"],
+                    "device": e["device_type"],
+                    "os": e["os"],
+                    "browser": e["browser"],
+                    "visitor_hash": e["visitor_hash"],
+                    "is_bot": e["is_bot"],
+                }
+                for e in reversed(CAPTURED_SCANS[-50:])
+            ],
+        },
+        headers=CACHE_BUST_HEADERS,
+    )
 
 
 @app.get("/export/{slug}")
