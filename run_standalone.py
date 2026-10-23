@@ -13,12 +13,16 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+import csv
 import html
+import io
 import json
 import logging
 import os
 import re
+import secrets
 import socket
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -350,7 +354,7 @@ app.add_middleware(
 class QRCreateDTO(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     slug: str = Field(min_length=1, max_length=100)
-    target_url: str
+    target_url: Optional[str] = ""
     foreground: str = "#0F172A"
     background: str = "#FFFFFF"
     background_type: str = "solid"  # "solid" | "gradient"
@@ -358,6 +362,18 @@ class QRCreateDTO(BaseModel):
     frame_text: Optional[str] = "ESCANEIE AQUI"
     module_style: str = "rounded"
     status: str = "active"
+
+
+class QRBatchCreateDTO(BaseModel):
+    count: int = Field(default=10, ge=1, le=500)
+    prefix: str = Field(default="qr-", max_length=50)
+    name_prefix: str = Field(default="Código Lote", max_length=100)
+    foreground: str = "#0F172A"
+    background: str = "#FFFFFF"
+    background_type: str = "solid"
+    background_color_end: Optional[str] = None
+    frame_text: Optional[str] = "ESCANEIE AQUI"
+    module_style: str = "rounded"
 
 
 class QRUpdateDTO(BaseModel):
@@ -483,13 +499,24 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
           </div>
         </div>
 
-        <button onclick="limparTudo()" class="inline-flex items-center gap-1.5 bg-zinc-100 hover:bg-rose-50 text-zinc-600 hover:text-rose-600 border border-zinc-200 text-xs font-medium px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl transition active:scale-95" title="Limpar todos os QR Codes e dados">
-          <i class="fa-solid fa-trash-can text-[11px]"></i>
-          <span class="hidden sm:inline">Limpar Painel</span>
+        <button onclick="abrirModalLote()" class="inline-flex items-center gap-1.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl shadow-xs transition active:scale-95">
+          <i class="fa-solid fa-bolt text-[11px]"></i>
+          <span>Gerar em Lote</span>
         </button>
+        <a href="/api/export-batch/pdf-sheet" target="_blank" class="inline-flex items-center gap-1.5 bg-white hover:bg-zinc-100 text-zinc-700 border border-zinc-200 text-xs font-semibold px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl transition" title="Baixar folha A4 com todos os códigos para impressão">
+          <i class="fa-solid fa-file-pdf text-rose-500 text-[11px]"></i>
+          <span class="hidden md:inline">Folha PDF</span>
+        </a>
+        <a href="/api/export-batch/csv" target="_blank" class="inline-flex items-center gap-1.5 bg-white hover:bg-zinc-100 text-zinc-700 border border-zinc-200 text-xs font-semibold px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl transition" title="Exportar planilha CSV com todos os códigos">
+          <i class="fa-solid fa-file-csv text-emerald-600 text-[11px]"></i>
+          <span class="hidden md:inline">CSV</span>
+        </a>
         <button onclick="abrirModalCriar()" class="inline-flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-semibold px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl shadow-xs transition active:scale-95">
           <i class="fa-solid fa-plus text-[10px]"></i>
-          <span>Novo QR</span>
+          <span class="hidden sm:inline">Novo</span> Avulso
+        </button>
+        <button onclick="limparTudo()" class="inline-flex items-center gap-1.5 bg-zinc-100 hover:bg-rose-50 text-zinc-500 hover:text-rose-600 border border-zinc-200 text-xs font-medium px-2 py-1.5 rounded-xl transition" title="Limpar todos os QR Codes">
+          <i class="fa-solid fa-trash-can text-[11px]"></i>
         </button>
       </div>
 
@@ -499,7 +526,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   <!-- Container Principal -->
   <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-5">
 
-    <!-- KPI Strip: Métricas de Segurança e Produção Gráfica -->
+    <!-- KPI Strip: Métricas Operacionais em Tempo Real -->
     <section class="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
       <div class="bg-white p-3 sm:p-3.5 rounded-xl border border-zinc-200/80 shadow-2xs flex items-center justify-between">
         <div>
@@ -507,54 +534,56 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
           <span id="kpi-total" class="text-xl sm:text-2xl font-bold text-zinc-900 tracking-tight">0</span>
         </div>
         <span class="text-[10px] text-zinc-600 font-semibold bg-zinc-100 px-2 py-0.5 rounded-md flex items-center gap-1">
-          <i class="fa-solid fa-layer-group text-[9px] text-indigo-600"></i> Salvos
+          <i class="fa-solid fa-layer-group text-[9px] text-indigo-600"></i> Cadastrados
         </span>
       </div>
 
       <div class="bg-white p-3 sm:p-3.5 rounded-xl border border-zinc-200/80 shadow-2xs flex items-center justify-between">
         <div>
-          <span class="text-[11px] font-medium text-zinc-400 block">Tipo de Código</span>
-          <span class="text-xl sm:text-2xl font-bold text-zinc-900 tracking-tight">Estático</span>
+          <span class="text-[11px] font-medium text-zinc-400 block">Ativos (Online)</span>
+          <span id="kpi-ativos" class="text-xl sm:text-2xl font-bold text-emerald-600 tracking-tight">0</span>
         </div>
         <span class="text-[10px] text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded-md flex items-center gap-1">
-          <i class="fa-solid fa-infinity text-[9px] text-emerald-600"></i> Permanente
+          <i class="fa-solid fa-circle-check text-[9px]"></i> Redirecionando
         </span>
       </div>
 
       <div class="bg-white p-3 sm:p-3.5 rounded-xl border border-zinc-200/80 shadow-2xs flex items-center justify-between">
         <div>
-          <span class="text-[11px] font-medium text-zinc-400 block">Dependência de PC</span>
-          <span class="text-xl sm:text-2xl font-bold text-emerald-600 tracking-tight">Zero (Offline)</span>
+          <span class="text-[11px] font-medium text-zinc-400 block">Aguardando 1º Scan</span>
+          <span id="kpi-unclaimed" class="text-xl sm:text-2xl font-bold text-amber-600 tracking-tight">0</span>
         </div>
-        <span class="text-[10px] text-emerald-700 font-medium bg-emerald-50 px-2 py-0.5 rounded-md flex items-center gap-1">
-          <i class="fa-solid fa-shield-check text-[9px]"></i> Imune a Quedas
+        <span class="text-[10px] text-amber-700 font-medium bg-amber-50 px-2 py-0.5 rounded-md flex items-center gap-1">
+          <i class="fa-solid fa-hourglass-half text-[9px]"></i> Prontos / Virgens
         </span>
       </div>
 
       <div class="bg-white p-3 sm:p-3.5 rounded-xl border border-zinc-200/80 shadow-2xs flex items-center justify-between">
         <div>
-          <span class="text-[11px] font-medium text-zinc-400 block">Qualidade Gráfica</span>
-          <span class="text-xl sm:text-2xl font-bold text-zinc-900 tracking-tight">Vetor & Alta Res</span>
+          <span class="text-[11px] font-medium text-zinc-400 block">Desativados / Pausados</span>
+          <span id="kpi-desativados" class="text-xl sm:text-2xl font-bold text-rose-600 tracking-tight">0</span>
         </div>
-        <span class="text-[10px] text-indigo-700 font-semibold bg-indigo-50 px-2 py-0.5 rounded-md">SVG • PNG • PDF</span>
+        <span class="text-[10px] text-rose-700 font-semibold bg-rose-50 px-2 py-0.5 rounded-md flex items-center gap-1">
+          <i class="fa-solid fa-pause text-[9px]"></i> Bloqueados
+        </span>
       </div>
     </section>
 
-    <!-- Banner Informativo de Segurança para Impressão -->
-    <section class="bg-white rounded-xl border border-emerald-200/80 bg-gradient-to-r from-emerald-50/50 via-white to-indigo-50/30 p-3.5 sm:p-4 shadow-2xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+    <!-- Banner Informativo da Plataforma Dinâmica -->
+    <section class="bg-white rounded-xl border border-indigo-200/70 bg-gradient-to-r from-indigo-50/50 via-white to-purple-50/30 p-3.5 sm:p-4 shadow-2xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
       <div class="flex items-center gap-3">
-        <div class="w-9 h-9 rounded-xl bg-emerald-500 text-white flex items-center justify-center text-sm shadow-xs shrink-0">
-          <i class="fa-solid fa-shield-check"></i>
+        <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-600 to-purple-600 text-white flex items-center justify-center text-sm shadow-xs shrink-0 font-bold">
+          <i class="fa-solid fa-bolt"></i>
         </div>
         <div>
-          <h4 class="font-bold text-zinc-900 text-xs sm:text-sm">Código 100% Permanente e Seguro para Impressão</h4>
-          <p class="text-zinc-600 text-[11px] mt-0.5">O link de destino é gravado diretamente no desenho do QR Code. Uma vez impresso, a câmera do celular abre o destino na hora, sem passar por servidor. Você pode desligar o computador ou ficar sem internet que o material impresso continuará funcionando para sempre.</p>
+          <h4 class="font-bold text-zinc-900 text-xs sm:text-sm">Plataforma Dinâmica: Criação em Lote & Ativação no 1º Scan</h4>
+          <p class="text-zinc-600 text-[11px] mt-0.5">Gere lotes de QR codes para impressão antecipada. Ao escanear pela primeira vez com a câmera do celular, o cliente final cadastra o link de destino. Pelo painel administrativo, você pode ativar, desativar ou editar qualquer código a qualquer momento.</p>
         </div>
       </div>
       <div class="flex items-center gap-2 shrink-0">
-        <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white text-zinc-800 font-semibold text-[11px] border border-zinc-200 shadow-2xs">
-          <i class="fa-solid fa-print text-indigo-600"></i> Padrão Gráfico
-        </span>
+        <button onclick="abrirModalLote()" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[11px] shadow-2xs transition">
+          <i class="fa-solid fa-plus text-[10px]"></i> Criar Novo Lote
+        </button>
       </div>
     </section>
 
@@ -564,13 +593,24 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       <!-- Busca rápida -->
       <div class="relative flex-1 max-w-sm">
         <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-xs text-zinc-400"></i>
-        <input type="text" id="filtro-busca" oninput="filtrarQRs()" placeholder="Buscar por nome ou URL de destino..." class="w-full text-xs bg-white rounded-xl border border-zinc-200/80 pl-8 pr-3 py-2 outline-none focus:border-zinc-400 focus:ring-1 focus:ring-zinc-400 transition">
+        <input type="text" id="filtro-busca" oninput="filtrarQRs()" placeholder="Buscar por nome, slug ou URL..." class="w-full text-xs bg-white rounded-xl border border-zinc-200/80 pl-8 pr-3 py-2 outline-none focus:border-zinc-400 focus:ring-1 focus:ring-zinc-400 transition">
       </div>
 
       <!-- Filtros e Alternância Grid/Lista -->
-      <div class="flex items-center justify-between sm:justify-end gap-2">
+      <div class="flex items-center justify-between sm:justify-end gap-2 flex-wrap">
         <div class="flex items-center space-x-1 bg-zinc-100 p-0.5 rounded-lg border border-zinc-200 text-xs">
-          <span class="font-semibold px-2.5 py-1 text-zinc-800">Todos os Códigos (<span id="count-all">0</span>)</span>
+          <button type="button" onclick="setFiltroStatus('all')" id="tab-filtro-all" class="px-2.5 py-1 rounded-md text-xs font-bold bg-white text-zinc-900 shadow-2xs">
+            Todos (<span id="count-all">0</span>)
+          </button>
+          <button type="button" onclick="setFiltroStatus('active')" id="tab-filtro-active" class="px-2.5 py-1 rounded-md text-xs font-medium text-zinc-500 hover:text-zinc-900 transition">
+            Ativos (<span id="count-active">0</span>)
+          </button>
+          <button type="button" onclick="setFiltroStatus('unclaimed')" id="tab-filtro-unclaimed" class="px-2.5 py-1 rounded-md text-xs font-medium text-zinc-500 hover:text-zinc-900 transition">
+            Aguardando 1º Scan (<span id="count-unclaimed">0</span>)
+          </button>
+          <button type="button" onclick="setFiltroStatus('paused')" id="tab-filtro-paused" class="px-2.5 py-1 rounded-md text-xs font-medium text-zinc-500 hover:text-zinc-900 transition">
+            Desativados (<span id="count-paused">0</span>)
+          </button>
         </div>
 
         <div class="flex items-center space-x-1 bg-zinc-100 p-0.5 rounded-lg border border-zinc-200 text-xs">
@@ -591,6 +631,66 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     </section>
 
   </main>
+
+  <!-- Modal Lote: Gerar Códigos em Escala (Prontos para 1º Scan) -->
+  <div id="modal-lote" class="fixed inset-0 bg-zinc-900/60 backdrop-blur-xs z-50 flex items-center justify-center hidden p-3 sm:p-4 transition-all">
+    <div class="bg-white rounded-2xl max-w-lg w-full flex flex-col shadow-2xl border border-zinc-200 overflow-hidden transform transition-all">
+      <div class="px-5 py-3.5 border-b border-zinc-100 flex items-center justify-between bg-zinc-50/70 shrink-0">
+        <div class="flex items-center gap-2">
+          <span class="w-7 h-7 rounded-lg bg-indigo-500/10 text-indigo-600 flex items-center justify-center text-sm font-bold">⚡</span>
+          <h3 class="font-bold text-sm text-zinc-900">Gerar QR Codes em Lote (Em Escala)</h3>
+        </div>
+        <button onclick="fecharModalLote()" class="w-7 h-7 rounded-lg hover:bg-zinc-200/60 text-zinc-400 hover:text-zinc-700 flex items-center justify-center transition">
+          <i class="fa-solid fa-xmark text-sm"></i>
+        </button>
+      </div>
+      <form id="form-lote" onsubmit="gerarLote(event)" class="p-5 space-y-4 text-xs">
+        <div>
+          <label class="block font-semibold text-zinc-700 mb-1">Quantidade de Códigos a Gerar</label>
+          <div class="flex items-center gap-3">
+            <input type="range" id="lote-qtd-slider" min="2" max="100" value="10" oninput="document.getElementById('lote-qtd-num').value = this.value" class="flex-1 accent-indigo-600 cursor-pointer">
+            <input type="number" id="lote-qtd-num" min="1" max="500" value="10" oninput="document.getElementById('lote-qtd-slider').value = this.value" class="w-20 px-2.5 py-1.5 border border-zinc-200 rounded-lg text-center font-bold text-zinc-800">
+          </div>
+          <p class="text-[10px] text-zinc-400 mt-1">Todos serão gerados em estado virgem, prontos para impressão e ativação no 1º scan.</p>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block font-semibold text-zinc-700 mb-1">Prefixo do Link</label>
+            <input type="text" id="lote-prefixo" value="mesa-" placeholder="Ex: mesa-, tag-, qr-" class="w-full px-3 py-2 border border-zinc-200 rounded-lg text-xs font-mono">
+          </div>
+          <div>
+            <label class="block font-semibold text-zinc-700 mb-1">Nome Base</label>
+            <input type="text" id="lote-nome" value="Mesa" placeholder="Ex: Mesa, Cartão, Produto" class="w-full px-3 py-2 border border-zinc-200 rounded-lg text-xs">
+          </div>
+        </div>
+        <div>
+          <label class="block font-semibold text-zinc-700 mb-1">Moldura do Código</label>
+          <input type="text" id="lote-frame" value="ESCANEIE AQUI" class="w-full px-3 py-2 border border-zinc-200 rounded-lg text-xs uppercase font-bold">
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block font-semibold text-zinc-700 mb-1">Cor dos Módulos</label>
+            <input type="color" id="lote-cor" value="#0F172A" class="w-full h-9 p-1 border border-zinc-200 rounded-lg cursor-pointer">
+          </div>
+          <div>
+            <label class="block font-semibold text-zinc-700 mb-1">Estilo dos Pontos</label>
+            <select id="lote-estilo" class="w-full h-9 px-2.5 border border-zinc-200 rounded-lg text-xs bg-white">
+              <option value="rounded" selected>Arredondado Moderno</option>
+              <option value="square">Quadrado Clássico</option>
+              <option value="dots">Pontilhado (Dots)</option>
+            </select>
+          </div>
+        </div>
+        <div class="pt-3 border-t border-zinc-100 flex items-center justify-end gap-2">
+          <button type="button" onclick="fecharModalLote()" class="px-4 py-2 border border-zinc-200 rounded-xl text-zinc-600 hover:bg-zinc-50 font-medium">Cancelar</button>
+          <button type="submit" id="btn-submit-lote" class="px-5 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-xl font-bold flex items-center gap-1.5 shadow-sm active:scale-95 transition">
+            <i class="fa-solid fa-bolt text-[11px]"></i>
+            <span>Gerar Lote de Códigos</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <!-- Modal CRUD: Criar / Editar QR Code (Responsivo, max-h-88vh, sem cortes) -->
   <div id="modal-qr" class="fixed inset-0 bg-zinc-900/50 backdrop-blur-xs z-50 flex items-center justify-center hidden p-3 sm:p-4 transition-all">
@@ -1121,12 +1221,143 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       }
     }
 
+    let filtroStatusAtual = 'all';
+
+    function setFiltroStatus(status) {
+      filtroStatusAtual = status;
+      ['all', 'active', 'unclaimed', 'paused'].forEach(s => {
+        const el = document.getElementById(`tab-filtro-${s}`);
+        if (el) {
+          if (s === status) {
+            el.className = 'px-2.5 py-1 rounded-md text-xs font-bold bg-white text-zinc-900 shadow-2xs';
+          } else {
+            el.className = 'px-2.5 py-1 rounded-md text-xs font-medium text-zinc-500 hover:text-zinc-900 transition';
+          }
+        }
+      });
+      filtrarQRs();
+    }
+
+    async function alternarStatus(slug, novoStatus) {
+      try {
+        const res = await fetch(`/api/qrcodes/${encodeURIComponent(slug)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: novoStatus })
+        });
+        if (res.ok) {
+          showToast(novoStatus === 'paused' ? `QR Code /${slug} desativado!` : `QR Code /${slug} ativado!`, novoStatus === 'paused' ? 'fa-pause text-amber-500' : 'fa-play text-emerald-500');
+          await carregarDashboard();
+        } else {
+          alert('Falha ao alterar status.');
+        }
+      } catch (err) {
+        alert('Erro de conexão ao alterar status.');
+      }
+    }
+
+    async function resetarPrimeiroScan(slug) {
+      if (!confirm(`Deseja resetar o QR Code /${slug} para o estado inicial?\n\nO link atual será removido e o código voltará a aguardar a 1ª leitura.`)) {
+        return;
+      }
+      try {
+        const res = await fetch(`/api/qrcodes/${encodeURIComponent(slug)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'unclaimed', target_url: '' })
+        });
+        if (res.ok) {
+          showToast(`QR Code /${slug} resetado para o 1º scan!`, 'fa-rotate-left text-blue-500');
+          await carregarDashboard();
+        }
+      } catch (err) {
+        alert('Erro ao resetar.');
+      }
+    }
+
+    function abrirModalLote() {
+      document.getElementById('modal-lote').classList.remove('hidden');
+    }
+
+    function fecharModalLote() {
+      document.getElementById('modal-lote').classList.add('hidden');
+    }
+
+    async function gerarLote(ev) {
+      ev.preventDefault();
+      const btn = document.getElementById('btn-submit-lote');
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Gerando...';
+
+      const count = parseInt(document.getElementById('lote-qtd-num').value) || 10;
+      const prefix = document.getElementById('lote-prefixo').value || 'qr-';
+      const name_prefix = document.getElementById('lote-nome').value || 'Mesa';
+      const frame_text = document.getElementById('lote-frame').value || 'ESCANEIE AQUI';
+      const foreground = document.getElementById('lote-cor').value || '#0F172A';
+      const module_style = document.getElementById('lote-estilo').value || 'rounded';
+
+      try {
+        const res = await fetch('/api/qrcodes/batch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            count,
+            prefix,
+            name_prefix,
+            frame_text,
+            foreground,
+            module_style
+          })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          fecharModalLote();
+          showToast(`${data.total} QR Codes gerados com sucesso!`, 'fa-bolt text-indigo-500');
+          await carregarDashboard();
+        } else {
+          const err = await res.json();
+          alert('Erro: ' + (err.detail || 'Falha ao gerar lote'));
+        }
+      } catch (err) {
+        alert('Erro de rede ao gerar lote.');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-bolt text-[11px]"></i> <span>Gerar Lote de Códigos</span>';
+      }
+    }
+
     function filtrarQRs() {
       const busca = (document.getElementById('filtro-busca').value || '').toLowerCase().trim();
+      
       const filtrados = todosQRs.filter(qr => {
         const bateBusca = !busca || qr.name.toLowerCase().includes(busca) || qr.slug.toLowerCase().includes(busca) || (qr.default_url || '').toLowerCase().includes(busca);
-        return bateBusca;
+        if (!bateBusca) return false;
+
+        const isUnclaimed = qr.status === 'unclaimed' || !qr.default_url || qr.default_url.trim() === '';
+        const isPaused = qr.status === 'paused' || qr.status === 'disabled';
+        const isActive = qr.status === 'active' && !isUnclaimed;
+
+        if (filtroStatusAtual === 'all') return true;
+        if (filtroStatusAtual === 'active') return isActive;
+        if (filtroStatusAtual === 'unclaimed') return isUnclaimed;
+        if (filtroStatusAtual === 'paused') return isPaused;
+        return true;
       });
+
+      const total = todosQRs.length;
+      const ativos = todosQRs.filter(q => q.status === 'active' && q.default_url && q.default_url.trim() !== '').length;
+      const virgens = todosQRs.filter(q => q.status === 'unclaimed' || !q.default_url || q.default_url.trim() === '').length;
+      const pausados = todosQRs.filter(q => q.status === 'paused' || q.status === 'disabled').length;
+
+      document.getElementById('kpi-total').innerText = total;
+      document.getElementById('kpi-ativos').innerText = ativos;
+      document.getElementById('kpi-unclaimed').innerText = virgens;
+      document.getElementById('kpi-desativados').innerText = pausados;
+
+      document.getElementById('count-all').innerText = total;
+      const cAct = document.getElementById('count-active'); if (cAct) cAct.innerText = ativos;
+      const cUnc = document.getElementById('count-unclaimed'); if (cUnc) cUnc.innerText = virgens;
+      const cPau = document.getElementById('count-paused'); if (cPau) cPau.innerText = pausados;
 
       if (modoVisualizacao === 'grid') {
         renderizarQRCards(filtrados);
@@ -1145,7 +1376,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
               <i class="fa-solid fa-qrcode"></i>
             </div>
             <h4 class="font-bold text-zinc-800 text-xs">Nenhum QR Code encontrado</h4>
-            <p class="text-[11px] text-zinc-400 mt-0.5">Crie um novo código para começar ou limpe o filtro de busca.</p>
+            <p class="text-[11px] text-zinc-400 mt-0.5">Crie um novo código para começar ou altere o filtro selecionado.</p>
           </div>
         `;
         return;
@@ -1173,15 +1404,35 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         const jsLiveFallbackUrl = escapeJs(liveFallbackUrl);
         const jsQrImgUrl = escapeJs(qrImgUrl);
 
+        const isUnclaimed = qr.status === 'unclaimed' || !qr.default_url || qr.default_url.trim() === '';
+        const isPaused = qr.status === 'paused' || qr.status === 'disabled';
+
+        let statusBadge = '';
+        let statusActionBtn = '';
+        if (isUnclaimed) {
+          statusBadge = `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-amber-50 text-amber-700 border border-amber-200 shrink-0"><i class="fa-solid fa-hourglass-start text-[8px]"></i> Aguardando 1º Scan</span>`;
+          statusActionBtn = `<a href="/${safeSlug}" target="_blank" class="px-2 py-1 rounded-md text-amber-900 bg-amber-100 hover:bg-amber-200 font-bold text-[11px] flex items-center gap-1 transition" title="Simular 1º scan"><i class="fa-solid fa-bolt text-[10px]"></i>Ativar</a>`;
+        } else if (isPaused) {
+          statusBadge = `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-rose-50 text-rose-700 border border-rose-200 shrink-0"><i class="fa-solid fa-pause text-[8px]"></i> Desativado</span>`;
+          statusActionBtn = `<button onclick="alternarStatus('${jsSlug}', 'active')" class="px-2 py-1 rounded-md text-white bg-emerald-600 hover:bg-emerald-500 font-bold text-[11px] flex items-center gap-1 transition" title="Reativar link"><i class="fa-solid fa-play text-[9px]"></i>Ativar</button>`;
+        } else {
+          statusBadge = `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0"><i class="fa-solid fa-circle-check text-[8px]"></i> Ativo</span>`;
+          statusActionBtn = `<button onclick="alternarStatus('${jsSlug}', 'paused')" class="px-2 py-1 rounded-md text-zinc-700 hover:text-rose-600 hover:bg-rose-50 font-medium text-[11px] flex items-center gap-1 transition" title="Desativar link"><i class="fa-solid fa-pause text-[9px]"></i>Pausar</button>`;
+        }
+
+        const resetBtn = !isUnclaimed ? `<button onclick="resetarPrimeiroScan('${jsSlug}')" class="px-1.5 py-1 rounded-md text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 font-medium text-[11px] transition" title="Resetar para novo 1º scan"><i class="fa-solid fa-rotate-left text-[10px]"></i></button>` : '';
+
+        const destContent = isUnclaimed 
+          ? `<span class="text-xs text-amber-600 font-medium italic block">Código virgem • Escaneie para ativar</span>`
+          : `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="text-xs text-blue-600 hover:text-blue-800 font-semibold truncate block" title="${safeUrl}"><i class="fa-solid fa-arrow-up-right-from-square text-[9px] mr-1"></i>${displayUrl}</a>`;
+
         return `
           <div class="bg-white rounded-xl border border-zinc-200/80 shadow-2xs hover:border-zinc-300 hover:shadow-xs transition p-3.5 flex flex-col justify-between">
             <div>
-              <!-- Top: Nome e Selo Permanente -->
+              <!-- Top: Nome e Status -->
               <div class="flex items-center justify-between gap-2 mb-2">
                 <h4 class="font-bold text-zinc-900 text-xs truncate" title="${safeName}">${safeName}</h4>
-                <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
-                  <i class="fa-solid fa-infinity text-[8px] text-emerald-600"></i> Permanente
-                </span>
+                ${statusBadge}
               </div>
 
               <!-- Meio: QR Code Thumbnail + Links -->
@@ -1191,16 +1442,15 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
                 </div>
                 <div class="min-w-0 flex-1 space-y-1.5">
                   <div>
-                    <span class="text-[9px] font-bold text-zinc-400 uppercase tracking-wider block">Destino Gravado</span>
-                    <a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="text-xs text-blue-600 hover:text-blue-800 font-semibold truncate block" title="${safeUrl}">
-                      <i class="fa-solid fa-arrow-up-right-from-square text-[9px] mr-1"></i>${displayUrl}
-                    </a>
+                    <span class="text-[9px] font-bold text-zinc-400 uppercase tracking-wider block">Destino Vinculado</span>
+                    ${destContent}
                   </div>
                   <div class="flex items-center gap-1">
-                    <span class="text-[10px] text-zinc-400 font-mono bg-white px-1.5 py-0.5 rounded border border-zinc-200">/${safeSlug}</span>
-                    <button onclick="copiarLink('${escapeJs(qr.default_url)}')" class="text-zinc-400 hover:text-zinc-700 text-[11px] p-0.5" title="Copiar link de destino">
+                    <span class="text-[10px] text-zinc-500 font-mono bg-white px-1.5 py-0.5 rounded border border-zinc-200">/${safeSlug}</span>
+                    <button onclick="copiarLink('${window.location.protocol}//${activeHost}/${safeSlug}')" class="text-zinc-400 hover:text-zinc-700 text-[11px] p-0.5" title="Copiar link do QR Code">
                       <i class="fa-regular fa-copy"></i>
                     </button>
+                    ${qr.clicks !== undefined ? `<span class="text-[9px] text-zinc-400 ml-auto font-semibold"><i class="fa-solid fa-chart-simple text-[8px] text-indigo-500 mr-0.5"></i>${qr.clicks} scans</span>` : ''}
                   </div>
                 </div>
               </div>
@@ -1209,12 +1459,11 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
             <!-- Rodapé: Ações e Downloads -->
             <div class="mt-2.5 pt-2 border-t border-zinc-100 flex items-center justify-between text-xs">
               <div class="flex items-center space-x-1">
-                <button onclick="abrirModalEditar('${jsSlug}')" class="px-2 py-1 rounded-md text-zinc-700 hover:bg-zinc-100 font-medium text-[11px] flex items-center gap-1 transition">
-                  <i class="fa-solid fa-palette text-[10px] text-indigo-600"></i>Design
+                ${statusActionBtn}
+                <button onclick="abrirModalEditar('${jsSlug}')" class="px-2 py-1 rounded-md text-zinc-700 hover:bg-zinc-100 font-medium text-[11px] flex items-center gap-1 transition" title="Editar link e cores">
+                  <i class="fa-solid fa-pen text-[9px] text-indigo-600"></i>Editar
                 </button>
-                <a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="px-2 py-1 rounded-md text-zinc-700 hover:bg-zinc-100 font-medium text-[11px] flex items-center gap-1 transition" title="Abrir link no navegador">
-                  <i class="fa-solid fa-arrow-turn-down text-[10px]"></i>Abrir
-                </a>
+                ${resetBtn}
               </div>
 
               <div class="flex items-center space-x-1">
@@ -1261,6 +1510,24 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         const jsLiveFallbackUrl = escapeJs(liveFallbackUrl);
         const jsQrImgUrl = escapeJs(qrImgUrl);
 
+        const isUnclaimed = qr.status === 'unclaimed' || !qr.default_url || qr.default_url.trim() === '';
+        const isPaused = qr.status === 'paused' || qr.status === 'disabled';
+
+        let statusBadge = '';
+        let statusActionBtn = '';
+        if (isUnclaimed) {
+          statusBadge = `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-amber-50 text-amber-700 border border-amber-200">Aguardando 1º Scan</span>`;
+          statusActionBtn = `<a href="/${safeSlug}" target="_blank" class="px-2 py-1 rounded bg-amber-100 hover:bg-amber-200 text-amber-900 text-[11px] font-bold">Ativar</a>`;
+        } else if (isPaused) {
+          statusBadge = `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-rose-50 text-rose-700 border border-rose-200">Desativado</span>`;
+          statusActionBtn = `<button onclick="alternarStatus('${jsSlug}', 'active')" class="px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold">Ativar</button>`;
+        } else {
+          statusBadge = `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">Ativo</span>`;
+          statusActionBtn = `<button onclick="alternarStatus('${jsSlug}', 'paused')" class="px-2 py-1 rounded bg-zinc-100 hover:bg-rose-50 text-zinc-700 hover:text-rose-600 text-[11px] font-medium">Pausar</button>`;
+        }
+
+        const resetBtn = !isUnclaimed ? `<button onclick="resetarPrimeiroScan('${jsSlug}')" class="px-1.5 py-1 rounded bg-zinc-100 hover:bg-zinc-200 text-zinc-500 text-[11px]" title="Resetar para novo 1º scan"><i class="fa-solid fa-rotate-left"></i></button>` : '';
+
         return `
           <div class="p-3 sm:px-4 flex items-center justify-between gap-3 hover:bg-zinc-50/70 transition">
             <div class="flex items-center space-x-3 min-w-0">
@@ -1270,20 +1537,21 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
               <div class="min-w-0">
                 <div class="flex items-center gap-2">
                   <h4 class="font-bold text-xs text-zinc-900 truncate" title="${safeName}">${safeName}</h4>
-                  <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">Permanente</span>
+                  ${statusBadge}
                 </div>
                 <div class="flex items-center gap-2 text-[11px] text-zinc-500 mt-0.5">
                   <span class="font-mono text-zinc-800 font-semibold">/${safeSlug}</span>
                   <span>•</span>
-                  <a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:text-blue-800 truncate max-w-xs">${safeUrl}</a>
+                  ${isUnclaimed ? '<span class="text-amber-600 italic">Código virgem • Aguardando ativação</span>' : `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:text-blue-800 truncate max-w-xs">${safeUrl}</a>`}
                 </div>
               </div>
             </div>
 
-            <div class="flex items-center space-x-2 shrink-0 text-xs">
-              <button onclick="copiarLink('${escapeJs(qr.default_url)}')" class="px-2 py-1 rounded bg-zinc-100 hover:bg-zinc-200 text-zinc-700 text-[11px] font-medium" title="Copiar link">Copiar</button>
-              <a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="px-2 py-1 rounded bg-zinc-100 hover:bg-zinc-200 text-zinc-700 text-[11px] font-medium">Abrir</a>
-              <button onclick="abrirModalEditar('${jsSlug}')" class="px-2 py-1 rounded bg-zinc-100 hover:bg-zinc-200 text-zinc-700 text-[11px] font-medium">Design</button>
+            <div class="flex items-center space-x-1.5 shrink-0 text-xs">
+              ${statusActionBtn}
+              <button onclick="copiarLink('${window.location.protocol}//${activeHost}/${safeSlug}')" class="px-2 py-1 rounded bg-zinc-100 hover:bg-zinc-200 text-zinc-700 text-[11px] font-medium" title="Copiar link curto">Copiar</button>
+              <button onclick="abrirModalEditar('${jsSlug}')" class="px-2 py-1 rounded bg-zinc-100 hover:bg-zinc-200 text-zinc-700 text-[11px] font-medium">Editar</button>
+              ${resetBtn}
               <a href="/export/${encodeURIComponent(qr.slug)}?format=svg&host_override=${encodeURIComponent(activeHost)}" class="text-[10px] font-bold bg-zinc-100 hover:bg-zinc-200 rounded text-zinc-700 p-1 px-1.5">SVG</a>
               <a href="/export/${encodeURIComponent(qr.slug)}?format=png&size=2048&host_override=${encodeURIComponent(activeHost)}" class="text-[10px] font-bold bg-zinc-100 hover:bg-zinc-200 rounded text-zinc-700 p-1 px-1.5">PNG</a>
               <a href="/export/${encodeURIComponent(qr.slug)}?format=pdf&host_override=${encodeURIComponent(activeHost)}" class="text-[10px] font-bold bg-zinc-100 hover:bg-zinc-200 rounded text-zinc-700 p-1 px-1.5">PDF</a>
@@ -1656,6 +1924,114 @@ def dashboard_view():
     return HTMLResponse(DASHBOARD_HTML)
 
 
+ACTIVATION_HTML = """<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>Ativar QR Code /{slug}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>body {{ font-family: 'Plus Jakarta Sans', sans-serif; }}</style>
+</head>
+<body class="bg-gradient-to-br from-zinc-950 via-zinc-900 to-black text-white min-h-screen flex items-center justify-center p-4">
+  <div class="max-w-md w-full bg-zinc-900/90 border border-zinc-800 backdrop-blur-2xl p-6 sm:p-8 rounded-3xl shadow-2xl relative overflow-hidden">
+    <div class="absolute -top-24 -right-24 w-48 h-48 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none"></div>
+    <div class="absolute -bottom-24 -left-24 w-48 h-48 bg-blue-500/15 rounded-full blur-3xl pointer-events-none"></div>
+
+    <div class="relative z-10 text-center">
+      <div class="w-14 h-14 bg-gradient-to-br from-emerald-400 to-teal-500 text-zinc-950 rounded-2xl flex items-center justify-center mx-auto mb-4 text-2xl shadow-lg shadow-emerald-500/20 font-bold">
+        ⚡
+      </div>
+      <span class="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full text-[10px] font-bold tracking-wider uppercase mb-2">
+        Código Pronto para Ativação
+      </span>
+      <h1 class="text-xl sm:text-2xl font-extrabold tracking-tight mb-2">Configure o Destino</h1>
+      <p class="text-xs text-zinc-400 leading-relaxed mb-6">
+        Este código impresso ainda não possui um link associado. Digite o endereço final para ativá-lo agora mesmo.
+      </p>
+
+      <form action="/api/qrcodes/{slug}/activate" method="POST" class="text-left space-y-3.5">
+        <div>
+          <label class="block text-xs font-semibold text-zinc-300 mb-1">Link de Destino Final</label>
+          <div class="relative">
+            <input 
+              type="text" 
+              name="target_url" 
+              placeholder="https://instagram.com/sua_loja ou seu site" 
+              required
+              class="w-full px-3.5 py-3 bg-zinc-800/80 border border-zinc-700 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition font-mono"
+            />
+          </div>
+          <p class="text-[10px] text-zinc-500 mt-1">Exemplo: Instagram, WhatsApp, Cardápio ou Site da empresa.</p>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-zinc-300 mb-1">Identificação / Nome (Opcional)</label>
+          <input 
+            type="text" 
+            name="name" 
+            value="{qr_name}"
+            placeholder="Ex: Cardápio Mesa 01" 
+            class="w-full px-3.5 py-2.5 bg-zinc-800/80 border border-zinc-700 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500 transition"
+          />
+        </div>
+
+        <button 
+          type="submit" 
+          class="w-full mt-2 py-3 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-zinc-950 font-bold rounded-xl text-xs sm:text-sm transition duration-150 shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 cursor-pointer active:scale-98"
+        >
+          <span>Salvar & Ativar QR Code</span>
+          <i class="fa-solid fa-arrow-right text-xs"></i>
+        </button>
+      </form>
+
+      <div class="mt-6 pt-4 border-t border-zinc-800 flex items-center justify-between text-[11px] text-zinc-500">
+        <span>Código: <strong class="text-zinc-300 font-mono">/{slug}</strong></span>
+        <span class="text-amber-400 font-semibold flex items-center gap-1">
+          <i class="fa-solid fa-circle text-[6px]"></i> Aguardando 1º Scan
+        </span>
+      </div>
+    </div>
+  </div>
+</body>
+</html>"""
+
+
+PAUSED_HTML = """<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>QR Code Indisponível</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>body {{ font-family: 'Plus Jakarta Sans', sans-serif; }}</style>
+</head>
+<body class="bg-zinc-950 text-white min-h-screen flex items-center justify-center p-4">
+  <div class="max-w-md w-full bg-zinc-900 border border-zinc-800 p-8 rounded-3xl shadow-2xl text-center">
+    <div class="w-14 h-14 bg-amber-500/10 text-amber-400 rounded-2xl flex items-center justify-center mx-auto mb-4 text-2xl border border-amber-500/20">
+      <i class="fa-solid fa-triangle-exclamation"></i>
+    </div>
+    <span class="inline-block px-3 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-full text-[10px] font-bold tracking-wider uppercase mb-2">
+      Acesso Pausado
+    </span>
+    <h1 class="text-lg font-bold mb-2 text-zinc-100">QR Code Temporariamente Indisponível</h1>
+    <p class="text-xs text-zinc-400 mb-6 leading-relaxed">
+      Este link dinâmico foi temporariamente desativado pelo administrador ou encerrou seu período de vigência.
+    </p>
+    <div class="p-2.5 bg-zinc-800/60 rounded-xl border border-zinc-800 text-[11px] text-zinc-500 font-mono">
+      Identificador: /{slug}
+    </div>
+  </div>
+</body>
+</html>"""
+
+
 # =====================================================================
 # ENDPOINTS REST DA API (CRUD COMPLETO COM SUPORTE MULTI-HOST)
 # =====================================================================
@@ -1777,18 +2153,24 @@ async def create_qr_api(body: QRCreateDTO, request: Request):
         except Exception:
             pass
 
-    target = re.sub(r"[\r\n\t]", "", body.target_url.strip())
-    if target.lower().startswith(("javascript:", "data:", "vbscript:")):
-        raise HTTPException(status_code=422, detail="URL inválida. Protocolo proibido.")
-    if not target.startswith(("http://", "https://")):
-        target = f"https://{target}"
+    raw_target = (body.target_url or "").strip()
+    target = re.sub(r"[\r\n\t]", "", raw_target)
+    if target:
+        if target.lower().startswith(("javascript:", "data:", "vbscript:")):
+            raise HTTPException(status_code=422, detail="URL inválida. Protocolo proibido.")
+        if not target.startswith(("http://", "https://")):
+            target = f"https://{target}"
 
-    # Previne loop infinito (SSRF/Loop Denial-of-Service)
-    parts = urlsplit(target)
-    target_host = (parts.hostname or "").lower()
-    target_path = parts.path.strip("/").lower()
-    if target_host in ("localhost", "127.0.0.1", "0.0.0.0", LAN_IP.lower()) and target_path == clean_slug:
-        raise HTTPException(status_code=422, detail="Destino não pode apontar para o próprio QR Code (loop infinito detectado).")
+        # Previne loop infinito (SSRF/Loop Denial-of-Service)
+        parts = urlsplit(target)
+        target_host = (parts.hostname or "").lower()
+        target_path = parts.path.strip("/").lower()
+        if target_host in ("localhost", "127.0.0.1", "0.0.0.0", LAN_IP.lower()) and target_path == clean_slug:
+            raise HTTPException(status_code=422, detail="Destino não pode apontar para o próprio QR Code (loop infinito detectado).")
+    else:
+        target = ""
+        if body.status == "active":
+            body.status = "unclaimed"
 
     # Auto-ajuste de contraste para garantir leitura por qualquer câmera
     fg = body.foreground
@@ -1827,13 +2209,16 @@ async def create_qr_api(body: QRCreateDTO, request: Request):
     current_host = request.headers.get("host", "").split(":")[0].lower()
     hosts_to_sync = set(KNOWN_HOSTS + [current_host])
     payload_str = json.dumps(payload)
+    for h in hosts_to_sync:
+        if h:
+            resolver.invalidate(f"qr:{h}:{clean_slug}")
     try:
-        for h in hosts_to_sync:
-            if h:
-                await redis_async.set(f"qr:{h}:{clean_slug}", payload_str, ex=86400)
-                resolver.invalidate(f"qr:{h}:{clean_slug}")
-        await redis_async.sadd("all_qr_slugs", clean_slug)
-        await redis_async.set(f"qr_meta:{clean_slug}", payload_str)
+        if redis_async:
+            for h in hosts_to_sync:
+                if h:
+                    await redis_async.set(f"qr:{h}:{clean_slug}", payload_str, ex=86400)
+            await redis_async.sadd("all_qr_slugs", clean_slug)
+            await redis_async.set(f"qr_meta:{clean_slug}", payload_str)
     except Exception as exc:
         log.warning("Sincronização Redis offline ou ignorada: %r", exc)
 
@@ -1868,19 +2253,25 @@ async def update_qr_api(slug: str, body: QRUpdateDTO, request: Request):
         item["name"] = re.sub(r"[\r\n\t]", " ", body.name.strip())
 
     if body.target_url is not None:
-        target = re.sub(r"[\r\n\t]", "", body.target_url.strip())
-        if target.lower().startswith(("javascript:", "data:", "vbscript:")):
-            raise HTTPException(status_code=422, detail="URL inválida. Protocolo proibido.")
-        if not target.startswith(("http://", "https://")):
-            target = f"https://{target}"
+        raw_target = body.target_url.strip()
+        if raw_target == "":
+            item["default_url"] = ""
+            if body.status is None:
+                item["status"] = "unclaimed"
+        else:
+            target = re.sub(r"[\r\n\t]", "", raw_target)
+            if target.lower().startswith(("javascript:", "data:", "vbscript:")):
+                raise HTTPException(status_code=422, detail="URL inválida. Protocolo proibido.")
+            if not target.startswith(("http://", "https://")):
+                target = f"https://{target}"
 
-        parts = urlsplit(target)
-        target_host = (parts.hostname or "").lower()
-        target_path = parts.path.strip("/").lower()
-        if target_host in ("localhost", "127.0.0.1", "0.0.0.0", LAN_IP.lower()) and target_path == clean_slug:
-            raise HTTPException(status_code=422, detail="Destino não pode apontar para o próprio QR Code (loop infinito detectado).")
+            parts = urlsplit(target)
+            target_host = (parts.hostname or "").lower()
+            target_path = parts.path.strip("/").lower()
+            if target_host in ("localhost", "127.0.0.1", "0.0.0.0", LAN_IP.lower()) and target_path == clean_slug:
+                raise HTTPException(status_code=422, detail="Destino não pode apontar para o próprio QR Code (loop infinito detectado).")
 
-        item["default_url"] = target
+            item["default_url"] = target
 
     if body.status is not None:
         item["status"] = body.status
@@ -1917,12 +2308,15 @@ async def update_qr_api(slug: str, body: QRUpdateDTO, request: Request):
     current_host = request.headers.get("host", "").split(":")[0].lower()
     hosts_to_sync = set(KNOWN_HOSTS + [current_host])
     payload_str = json.dumps(item)
+    for h in hosts_to_sync:
+        if h:
+            resolver.invalidate(f"qr:{h}:{clean_slug}")
     try:
-        for h in hosts_to_sync:
-            if h:
-                await redis_async.set(f"qr:{h}:{clean_slug}", payload_str, ex=86400)
-                resolver.invalidate(f"qr:{h}:{clean_slug}")
-        await redis_async.set(f"qr_meta:{clean_slug}", payload_str)
+        if redis_async:
+            for h in hosts_to_sync:
+                if h:
+                    await redis_async.set(f"qr:{h}:{clean_slug}", payload_str, ex=86400)
+            await redis_async.set(f"qr_meta:{clean_slug}", payload_str)
     except Exception as exc:
         log.warning("Sincronização Redis offline ou ignorada: %r", exc)
 
@@ -1940,6 +2334,9 @@ async def delete_qr_api(slug: str, request: Request):
 
     current_host = request.headers.get("host", "").split(":")[0].lower()
     hosts_to_sync = set(KNOWN_HOSTS + [current_host])
+    for h in hosts_to_sync:
+        if h:
+            resolver.invalidate(f"qr:{h}:{clean_slug}")
     try:
         if redis_async:
             await redis_async.sadd("deleted_qr_slugs", clean_slug)
@@ -1949,12 +2346,289 @@ async def delete_qr_api(slug: str, request: Request):
             for h in hosts_to_sync:
                 if h:
                     await redis_async.delete(f"qr:{h}:{clean_slug}")
-                    resolver.invalidate(f"qr:{h}:{clean_slug}")
     except Exception as exc:
         log.warning("Sincronização Redis offline ou ignorada durante exclusão: %r", exc)
 
     # Operação 100% idempotente (RFC 7231 / 9110)
     return {"status": "deleted", "slug": clean_slug}
+
+
+@app.post("/api/qrcodes/batch")
+async def create_batch_qr_api(body: QRBatchCreateDTO, request: Request):
+    created = []
+    current_host = request.headers.get("host", "").split(":")[0].lower()
+    proto = "https" if IS_SERVERLESS or "vercel.app" in current_host else "http"
+
+    fg = body.foreground
+    bg = body.background or "#FFFFFF"
+    try:
+        validate(QRDesign(foreground=fg, background=bg))
+    except InvalidDesign:
+        fg = "#0F172A"
+        bg = "#FFFFFF"
+
+    clean_prefix = re.sub(r"[^a-z0-9_-]", "", body.prefix.strip().lower())
+    if not clean_prefix:
+        clean_prefix = "qr-"
+
+    for i in range(1, body.count + 1):
+        rand_suffix = secrets.token_hex(2)
+        slug = f"{clean_prefix}{i:02d}-{rand_suffix}" if body.count > 1 else f"{clean_prefix}{rand_suffix}"
+        slug = slug[:50]
+        while slug in IN_MEMORY_DB or slug in DELETED_SLUGS:
+            slug = f"{clean_prefix}{i:02d}-{secrets.token_hex(3)}"[:50]
+
+        DELETED_SLUGS.discard(slug)
+        payload = {
+            "v": 1,
+            "name": f"{body.name_prefix.strip()} #{i:02d}",
+            "qr_id": str(uuid.uuid4()),
+            "workspace_id": "00000000-0000-0000-0000-000000000003",
+            "status": "unclaimed",
+            "default_url": "",
+            "fallback_url": None,
+            "expires_at": None,
+            "utm": {"utm_source": "qrcode", "utm_campaign": "batch"},
+            "design": {
+                "foreground": fg,
+                "background": bg,
+                "background_type": body.background_type or "solid",
+                "background_color_end": body.background_color_end,
+                "module_style": body.module_style,
+                "finder_style": "rounded" if body.module_style == "rounded" else "square",
+                "frame_text": body.frame_text,
+            },
+            "rules": [],
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        IN_MEMORY_DB[slug] = payload
+        sync_redis_slug(slug, payload)
+        created.append({
+            "slug": slug,
+            "name": payload["name"],
+            "short_url": f"{proto}://{current_host or 'localhost'}/{slug}",
+            "status": "unclaimed",
+        })
+
+    save_local_db()
+    return {"status": "created", "total": len(created), "items": created}
+
+
+@app.post("/api/qrcodes/{slug}/activate")
+async def activate_qr_api(slug: str, request: Request):
+    clean_slug = slug.strip().lstrip("/").lower()
+    content_type = request.headers.get("content-type", "")
+    target_url = ""
+    friendly_name = None
+
+    if "application/json" in content_type:
+        try:
+            body = await request.json()
+            target_url = body.get("target_url") or body.get("url") or ""
+            friendly_name = body.get("name")
+        except Exception:
+            pass
+    else:
+        form = await request.form()
+        target_url = form.get("target_url") or form.get("url") or ""
+        friendly_name = form.get("name")
+
+    target = re.sub(r"[\r\n\t]", "", str(target_url).strip())
+    if not target:
+        raise HTTPException(status_code=422, detail="Por favor, informe uma URL de destino válida.")
+
+    if target.lower().startswith(("javascript:", "data:", "vbscript:")):
+        raise HTTPException(status_code=422, detail="Protocolo inválido.")
+
+    if not target.startswith(("http://", "https://")):
+        target = f"https://{target}"
+
+    parts = urlsplit(target)
+    target_host = (parts.hostname or "").lower()
+    target_path = parts.path.strip("/").lower()
+    if target_host in ("localhost", "127.0.0.1", "0.0.0.0", LAN_IP.lower()) and target_path == clean_slug:
+        raise HTTPException(status_code=422, detail="Destino não pode apontar para o próprio código.")
+
+    if clean_slug not in IN_MEMORY_DB and REDIS_URL:
+        try:
+            meta = await redis_async.get(f"qr_meta:{clean_slug}")
+            if meta:
+                IN_MEMORY_DB[clean_slug] = json.loads(meta)
+        except Exception:
+            pass
+
+    if clean_slug not in IN_MEMORY_DB:
+        raise HTTPException(status_code=404, detail="QR Code não encontrado.")
+
+    item = IN_MEMORY_DB[clean_slug]
+    item["default_url"] = target
+    item["status"] = "active"
+    item["v"] = item.get("v", 1) + 1
+    if friendly_name and str(friendly_name).strip():
+        item["name"] = re.sub(r"[\r\n\t]", " ", str(friendly_name).strip())
+
+    current_host = request.headers.get("host", "").split(":")[0].lower()
+    hosts_to_sync = set(KNOWN_HOSTS + [current_host])
+    payload_str = json.dumps(item)
+    for h in hosts_to_sync:
+        if h:
+            resolver.invalidate(f"qr:{h}:{clean_slug}")
+    if redis_async:
+        try:
+            for h in hosts_to_sync:
+                if h:
+                    await redis_async.set(f"qr:{h}:{clean_slug}", payload_str, ex=86400)
+            await redis_async.sadd("all_qr_slugs", clean_slug)
+            await redis_async.set(f"qr_meta:{clean_slug}", payload_str)
+        except Exception as exc:
+            log.warning("Falha ao salvar no Redis durante ativação: %r", exc)
+    save_local_db()
+
+    accept = request.headers.get("accept", "")
+    if "text/html" in accept or "application/x-www-form-urlencoded" in content_type:
+        success_html = f"""<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QR Code Ativado com Sucesso!</title>
+  <meta http-equiv="refresh" content="2;url={html.escape(target)}">
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-zinc-900 flex items-center justify-center min-h-screen p-4 text-white">
+  <div class="max-w-md w-full bg-zinc-800 border border-emerald-500/40 p-8 rounded-3xl shadow-2xl text-center">
+    <div class="w-16 h-16 bg-emerald-500/20 text-emerald-400 rounded-2xl flex items-center justify-center mx-auto mb-4 text-3xl font-bold">
+      ✓
+    </div>
+    <h1 class="text-xl font-bold mb-2">QR Code Ativado com Sucesso!</h1>
+    <p class="text-xs text-zinc-400 mb-5 leading-relaxed">O destino foi vinculado ao seu código impresso.</p>
+    <div class="bg-zinc-900/80 p-3 rounded-xl border border-zinc-700 text-xs text-emerald-400 truncate font-mono mb-6">
+      {html.escape(target)}
+    </div>
+    <a href="{html.escape(target)}" class="block w-full py-3 bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold rounded-xl text-xs transition shadow-lg shadow-emerald-500/20">
+      Acessar Link Agora &rarr;
+    </a>
+    <p class="text-[10px] text-zinc-500 mt-4">Redirecionando em 2 segundos...</p>
+  </div>
+</body>
+</html>"""
+        return HTMLResponse(success_html, status_code=200, headers=NO_STORE)
+
+    return {"status": "activated", "slug": clean_slug, "target_url": target}
+
+
+@app.get("/api/export-batch/pdf-sheet")
+async def export_batch_pdf_sheet(request: Request, prefix: Optional[str] = None, status: Optional[str] = None):
+    slugs = [s for s in list(IN_MEMORY_DB.keys()) if s not in DELETED_SLUGS]
+    if prefix:
+        slugs = [s for s in slugs if s.startswith(prefix.strip().lower())]
+    if status and status != "all":
+        slugs = [s for s in slugs if IN_MEMORY_DB.get(s, {}).get("status") == status]
+
+    if not slugs:
+        raise HTTPException(status_code=404, detail="Nenhum QR Code encontrado para gerar folha de impressão.")
+
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import mm
+        from reportlab.pdfgen import canvas
+        from reportlab.lib.utils import ImageReader
+    except ImportError:
+        raise HTTPException(status_code=500, detail="ReportLab não instalado.")
+
+    active_host = request.headers.get("host", "localhost")
+    proto = "https" if IS_SERVERLESS or "vercel.app" in active_host else "http"
+
+    out = io.BytesIO()
+    c = canvas.Canvas(out, pagesize=A4)
+    page_w, page_h = A4
+
+    cols, rows = 3, 4
+    margin_x = 12 * mm
+    margin_y = 15 * mm
+    usable_w = page_w - (2 * margin_x)
+    usable_h = page_h - (2 * margin_y)
+    col_w = usable_w / cols
+    row_h = usable_h / rows
+    qr_size = min(col_w - 6 * mm, row_h - 16 * mm)
+
+    for idx, s in enumerate(slugs):
+        page_idx = idx % (cols * rows)
+        if idx > 0 and page_idx == 0:
+            c.showPage()
+
+        col_i = page_idx % cols
+        row_i = page_idx // cols
+
+        cell_x = margin_x + col_i * col_w
+        cell_y = page_h - margin_y - (row_i + 1) * row_h
+
+        # Linha pontilhada para corte
+        c.setStrokeColorRGB(0.85, 0.85, 0.88)
+        c.setLineWidth(0.5)
+        c.setDash(2, 2)
+        c.roundRect(cell_x + 1.5 * mm, cell_y + 1.5 * mm, col_w - 3 * mm, row_h - 3 * mm, 3 * mm, stroke=1, fill=0)
+        c.setDash()
+
+        # Renderiza imagem QR Code
+        qr_target = f"{proto}://{active_host}/{s}"
+        payload = IN_MEMORY_DB.get(s, {})
+        d = payload.get("design", {})
+        design = QRDesign(
+            foreground=d.get("foreground", "#0F172A"),
+            background="#FFFFFF",
+            module_style=d.get("module_style", "rounded"),
+            finder_style="rounded" if d.get("module_style", "rounded") == "rounded" else "square",
+            frame_text=d.get("frame_text", "ESCANEIE AQUI"),
+        )
+        png_bytes = render(qr_target, design=design, fmt="png", size_px=512)
+        qr_img = ImageReader(io.BytesIO(png_bytes))
+
+        qr_x = cell_x + (col_w - qr_size) / 2
+        qr_y = cell_y + 9 * mm
+        c.drawImage(qr_img, qr_x, qr_y, qr_size, qr_size)
+
+        c.setFillColorRGB(0.1, 0.1, 0.15)
+        c.setFont("Helvetica-Bold", 8)
+        name = payload.get("name") or s
+        c.drawCentredString(cell_x + col_w / 2, cell_y + 5.5 * mm, str(name)[:25])
+
+        c.setFillColorRGB(0.4, 0.4, 0.45)
+        c.setFont("Helvetica", 7)
+        c.drawCentredString(cell_x + col_w / 2, cell_y + 2.5 * mm, f"/{s}")
+
+    c.showPage()
+    c.save()
+
+    return Response(
+        content=out.getvalue(),
+        media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=folha_qrcodes_impressao.pdf"},
+    )
+
+
+@app.get("/api/export-batch/csv")
+async def export_batch_csv(request: Request):
+    active_host = request.headers.get("host", "localhost")
+    proto = "https" if IS_SERVERLESS or "vercel.app" in active_host else "http"
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Slug", "Nome", "Status", "Link Curto Impresso", "URL Destino Atual", "Data Criacao"])
+    for s, p in IN_MEMORY_DB.items():
+        if s not in DELETED_SLUGS:
+            writer.writerow([
+                s,
+                p.get("name", s),
+                p.get("status", "active"),
+                f"{proto}://{active_host}/{s}",
+                p.get("default_url", ""),
+                p.get("created_at", ""),
+            ])
+    return Response(
+        content=output.getvalue().encode("utf-8-sig"),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=relatorio_qrcodes.csv"},
+    )
 
 
 def apply_svg_gradient(svg_bytes: bytes, bg_start: str, bg_end: str, gradient_id: str = "qr-bg-grad") -> bytes:
@@ -2072,7 +2746,8 @@ async def preview_svg(
         frame_text=f_text,
     )
 
-    target_data = (payload.get("default_url") if payload else "").strip() or f"http://{active_host}/{clean_slug}"
+    proto = "https" if IS_SERVERLESS or "vercel.app" in active_host else "http"
+    target_data = f"{proto}://{active_host}/{clean_slug}"
     try:
         svg_bytes = render(target_data, design=design, fmt="svg", size_px=400)
     except Exception:
@@ -2167,7 +2842,8 @@ async def export_qr(
         finder_style=f_style,
         frame_text=f_text,
     )
-    target_data = (payload.get("default_url") if payload else "").strip() or f"http://{active_host}/{clean_slug}"
+    proto = "https" if IS_SERVERLESS or "vercel.app" in active_host else "http"
+    target_data = f"{proto}://{active_host}/{clean_slug}"
     try:
         content = render(target_data, design=design, fmt=format, size_px=size)
     except InvalidDesign:
@@ -2249,6 +2925,20 @@ async def redirect_endpoint(slug: str, request: Request):
             )
         return PlainTextResponse(f"QR Code /{clean_slug} não encontrado", status_code=404, headers=NO_STORE)
 
+    # 1. Fluxo de Primeiro Scan: código virgem (unclaimed) aguardando ativação
+    is_unclaimed = (
+        payload.get("status") == "unclaimed"
+        or not payload.get("default_url")
+        or str(payload.get("default_url", "")).strip() == ""
+    )
+    if is_unclaimed:
+        qr_name = html.escape(payload.get("name") or clean_slug)
+        return HTMLResponse(
+            ACTIVATION_HTML.format(slug=clean_slug, qr_name=qr_name),
+            status_code=200,
+            headers=NO_STORE,
+        )
+
     decision = decide(payload, headers.get("user-agent", ""), None, datetime.now(timezone.utc))
     if decision.kind == "gone":
         fallback = payload.get("fallback_url")
@@ -2257,23 +2947,7 @@ async def redirect_endpoint(slug: str, request: Request):
         accept = headers.get("accept", "")
         if "text/html" in accept:
             return HTMLResponse(
-                """<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>QR Code Indisponível</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-zinc-50 flex items-center justify-center min-h-screen p-4 text-zinc-800">
-  <div class="max-w-md w-full bg-white p-8 rounded-2xl border border-zinc-200 shadow-sm text-center">
-    <div class="w-12 h-12 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-4 text-xl">⚠️</div>
-    <h1 class="text-base font-bold text-zinc-900 mb-2">QR Code Temporariamente Indisponível</h1>
-    <p class="text-xs text-zinc-500 mb-6">Este link dinâmico está pausado ou encerrou seu período de vigência.</p>
-    <a href="/" class="inline-block px-4 py-2 bg-zinc-900 text-white rounded-lg text-xs font-semibold hover:bg-zinc-800 transition">Acessar Painel</a>
-  </div>
-</body>
-</html>""",
+                PAUSED_HTML.format(slug=clean_slug),
                 status_code=410,
                 headers=NO_STORE,
             )

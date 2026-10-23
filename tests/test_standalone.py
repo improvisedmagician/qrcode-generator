@@ -6,11 +6,11 @@ from run_standalone import app, IN_MEMORY_DB
 
 
 @pytest.fixture
-def client():
-    from run_standalone import DELETED_SLUGS
-    DELETED_SLUGS.discard("promo")
-    DELETED_SLUGS.discard("blackfriday")
-    DELETED_SLUGS.discard("insta")
+def client(tmp_path, monkeypatch):
+    import run_standalone
+    monkeypatch.setattr(run_standalone, "LOCAL_DB_FILE", tmp_path / "test_qrcodes_db.json")
+    run_standalone.DELETED_SLUGS.clear()
+    IN_MEMORY_DB.clear()
     IN_MEMORY_DB["promo"] = {
         "v": 1,
         "name": "Banner Institucional São Paulo",
@@ -444,6 +444,135 @@ def test_qr_and_dashboard_gradient_background(client):
     resp_exp_png = client.get(f"/export/{grad_slug}?format=png&size=256")
     assert resp_exp_png.status_code == 200
     assert resp_exp_png.headers["content-type"] == "image/png"
+
+
+def test_batch_generation_and_unclaimed_state(client):
+    # 1. Gerar lote de 3 QR codes com prefixo 'mesa'
+    payload = {
+        "count": 3,
+        "prefix": "mesa",
+        "name_prefix": "Mesa",
+        "foreground": "#0F172A",
+        "module_style": "rounded",
+    }
+    resp = client.post("/api/qrcodes/batch", json=payload)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "created"
+    assert data["total"] == 3
+    assert len(data["items"]) == 3
+
+    slugs = [item["slug"] for item in data["items"]]
+    for item in data["items"]:
+        assert item["status"] == "unclaimed"
+        assert item["slug"].startswith("mesa")
+
+    # 2. Listagem deve refletir os novos itens como unclaimed
+    resp_list = client.get("/api/qrcodes")
+    assert resp_list.status_code == 200
+    all_qrs = {q["slug"]: q for q in resp_list.json()}
+    for s in slugs:
+        assert s in all_qrs
+        assert all_qrs[s]["status"] == "unclaimed"
+        assert all_qrs[s]["default_url"] == ""
+
+
+def test_first_scan_activation_and_admin_lifecycle(client):
+    # 1. Criar um QR code virgem (unclaimed)
+    qr_payload = {
+        "name": "Cartão Virgem Teste",
+        "slug": "cartao-virgem-01",
+        "target_url": "",
+        "status": "unclaimed",
+    }
+    resp_create = client.post("/api/qrcodes", json=qr_payload)
+    assert resp_create.status_code == 200
+
+    # 2. Primeiro Scan: GET /{slug} deve exibir a tela de ativação (HTML)
+    resp_scan1 = client.get("/cartao-virgem-01", follow_redirects=False)
+    assert resp_scan1.status_code == 200
+    assert "Ativar QR Code" in resp_scan1.text
+    assert "cartao-virgem-01" in resp_scan1.text
+
+    # 3. Tentativa de ativação com URL inválida/perigosa deve falhar
+    resp_bad = client.post(
+        "/api/qrcodes/cartao-virgem-01/activate",
+        json={"target_url": "javascript:alert(1)"},
+    )
+    assert resp_bad.status_code == 422
+
+    # 4. Ativação legítima com URL final
+    dest_url = "https://instagram.com/pizzaria_central"
+    resp_act = client.post(
+        "/api/qrcodes/cartao-virgem-01/activate",
+        json={"target_url": dest_url},
+    )
+    assert resp_act.status_code == 200
+    act_data = resp_act.json()
+    assert act_data["status"] == "activated"
+    assert act_data["target_url"] == dest_url
+    assert act_data["slug"] == "cartao-virgem-01"
+
+    # Confere dados atualizados no detalhe da API
+    detail = client.get("/api/qrcodes/cartao-virgem-01").json()
+    assert detail["status"] == "active"
+    assert detail["default_url"] == dest_url
+
+    # 5. Próximo Scan: GET /{slug} agora redireciona 302 diretamente para o link ativado
+    resp_scan2 = client.get("/cartao-virgem-01", follow_redirects=False)
+    assert resp_scan2.status_code == 302
+    assert resp_scan2.headers["location"].startswith(dest_url)
+
+    # 6. Admin: Pausar / Desativar o link via painel
+    resp_pause = client.put(
+        "/api/qrcodes/cartao-virgem-01",
+        json={"status": "paused"},
+    )
+    assert resp_pause.status_code == 200
+    assert resp_pause.json()["data"]["status"] == "paused"
+
+    resp_scan_paused = client.get("/cartao-virgem-01", headers={"Accept": "text/html"}, follow_redirects=False)
+    assert resp_scan_paused.status_code == 410
+    assert "QR Code Temporariamente Indisponível" in resp_scan_paused.text
+
+    # 7. Admin: Reativar o link via painel
+    resp_resume = client.put(
+        "/api/qrcodes/cartao-virgem-01",
+        json={"status": "active"},
+    )
+    assert resp_resume.status_code == 200
+    resp_scan_resumed = client.get("/cartao-virgem-01", follow_redirects=False)
+    assert resp_scan_resumed.status_code == 302
+    assert resp_scan_resumed.headers["location"].startswith(dest_url)
+
+    # 8. Admin: Resetar QR Code para virgem ("Aguardando 1º Scan")
+    resp_reset = client.put(
+        "/api/qrcodes/cartao-virgem-01",
+        json={"status": "unclaimed", "default_url": ""},
+    )
+    assert resp_reset.status_code == 200
+    assert resp_reset.json()["data"]["status"] == "unclaimed"
+
+    resp_scan_reset = client.get("/cartao-virgem-01", follow_redirects=False)
+    assert resp_scan_reset.status_code == 200
+    assert "Ativar QR Code" in resp_scan_reset.text
+
+
+def test_batch_export_pdf_and_csv(client):
+    # 1. Export PDF sheet
+    resp_pdf = client.get("/api/export-batch/pdf-sheet")
+    assert resp_pdf.status_code == 200
+    assert resp_pdf.headers["content-type"] == "application/pdf"
+    assert resp_pdf.content.startswith(b"%PDF-")
+
+    # 2. Export CSV
+    resp_csv = client.get("/api/export-batch/csv")
+    assert resp_csv.status_code == 200
+    assert "text/csv" in resp_csv.headers["content-type"]
+    csv_text = resp_csv.text
+    assert "Slug,Nome,Status,Link Curto Impresso,URL Destino Atual,Data Criacao" in csv_text
+    assert "promo" in csv_text
+
 
 
 
