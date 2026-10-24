@@ -72,6 +72,7 @@ def client(tmp_path, monkeypatch):
         "created_at": "2026-10-16T18:30:00Z",
     }
     with TestClient(app) as c:
+        c.cookies.set(run_standalone.AUTH_COOKIE_NAME, run_standalone.create_session_token())
         yield c
 
 
@@ -664,4 +665,104 @@ def test_natural_numeric_sorting_order(client):
     assert resp_dash.status_code == 200
     assert "select-ordenacao" in resp_dash.text
     assert "compararQRs" in resp_dash.text
+
+
+def test_lock_screen_unauthenticated():
+    with TestClient(app) as unauth_client:
+        # Acesso sem cookie deve retornar a tela de bloqueio com status 200
+        resp = unauth_client.get("/")
+        assert resp.status_code == 200
+        assert "Painel Bloqueado" in resp.text
+        assert "admin-password" in resp.text
+        assert "Desbloquear Painel" in resp.text
+        assert "QR Estático" in resp.text
+        # Não deve renderizar o conteúdo do dashboard administrativo
+        assert "escapeHtml" not in resp.text
+
+
+def test_admin_api_requires_auth():
+    with TestClient(app) as unauth_client:
+        # Endpoints administrativos devem retornar 401 sem autenticação
+        endpoints = [
+            ("get", "/api/qrcodes"),
+            ("get", "/api/qrcodes/promo"),
+            ("post", "/api/qrcodes"),
+            ("put", "/api/qrcodes/promo"),
+            ("delete", "/api/qrcodes/promo"),
+            ("post", "/api/qrcodes/clear-all"),
+            ("post", "/api/qrcodes/batch"),
+            ("get", "/api/export-batch/pdf-sheet"),
+            ("get", "/api/export-batch/csv"),
+            ("get", "/scans"),
+            ("get", "/export/promo"),
+        ]
+        for method, url in endpoints:
+            if method == "get":
+                r = unauth_client.get(url)
+            elif method == "post":
+                r = unauth_client.post(url, json={"name": "Teste", "slug": "teste-auth"})
+            elif method == "put":
+                r = unauth_client.put(url, json={"name": "Teste Atualizado"})
+            elif method == "delete":
+                r = unauth_client.delete(url)
+            assert r.status_code == 401, f"{method.upper()} {url} retornou {r.status_code}, esperado 401"
+
+
+def test_auth_api_login_wrong_password():
+    with TestClient(app) as c:
+        resp = c.post("/api/auth/login", json={"password": "senha-incorreta-xyz"})
+        assert resp.status_code == 401
+        assert "Senha incorreta" in resp.json()["detail"]
+
+
+def test_auth_api_login_success_and_logout():
+    with TestClient(app) as c:
+        # 1. Verifica status inicial
+        resp_status = c.get("/api/auth/status")
+        assert resp_status.status_code == 200
+        assert resp_status.json()["authenticated"] is False
+
+        # 2. Login com a senha padrão admin123
+        resp_login = c.post("/api/auth/login", json={"password": "admin123"})
+        assert resp_login.status_code == 200
+        assert resp_login.json()["status"] == "ok"
+        assert "qr_auth_session" in c.cookies
+
+        # 3. Status deve ser True
+        resp_status_after = c.get("/api/auth/status")
+        assert resp_status_after.json()["authenticated"] is True
+
+        # 4. Acesso ao painel agora carrega o DASHBOARD_HTML completo
+        resp_dash = c.get("/")
+        assert resp_dash.status_code == 200
+        assert "escapeHtml" in resp_dash.text
+        assert "Bloquear" in resp_dash.text
+
+        # 5. Logout encerra a sessão
+        resp_logout = c.post("/api/auth/logout")
+        assert resp_logout.status_code == 200
+
+        # 6. Status volta para False e dashboard volta para tela de bloqueio
+        resp_status_final = c.get("/api/auth/status")
+        assert resp_status_final.json()["authenticated"] is False
+
+        resp_lock = c.get("/")
+        assert resp_lock.status_code == 200
+        assert "Painel Bloqueado" in resp_lock.text
+
+
+def test_public_redirect_remains_unauthenticated():
+    from run_standalone import IN_MEMORY_DB, DELETED_SLUGS
+    DELETED_SLUGS.discard("public-qr-test")
+    IN_MEMORY_DB["public-qr-test"] = {
+        "status": "active",
+        "default_url": "https://minhaloja.com.br",
+        "v": 1,
+    }
+    with TestClient(app) as c:
+        # Escaneamento de QR Code público NUNCA exige senha (sem cookie auth)
+        resp = c.get("/public-qr-test", follow_redirects=False)
+        assert resp.status_code == 302
+        assert "minhaloja.com.br" in resp.headers["location"]
+
 

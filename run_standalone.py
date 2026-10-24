@@ -14,6 +14,8 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 import csv
+import hashlib
+import hmac
 import html
 import io
 import json
@@ -22,6 +24,7 @@ import os
 import re
 import secrets
 import socket
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -47,6 +50,75 @@ CACHE_BUST_HEADERS = {
     "Pragma": "no-cache",
     "Expires": "0",
 }
+
+# Configurações de Autenticação e Bloqueio de Acesso
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
+AUTH_SECRET_KEY = os.getenv("AUTH_SECRET_KEY", "qr-master-secret-2026")
+AUTH_COOKIE_NAME = "qr_auth_session"
+SESSION_MAX_AGE = 7 * 24 * 3600  # 7 dias em segundos
+
+
+def create_session_token() -> str:
+    """Gera um token de sessão assinado com HMAC-SHA256 (stateless)."""
+    ts = str(int(time.time()))
+    sig = hmac.new(AUTH_SECRET_KEY.encode("utf-8"), ts.encode("utf-8"), hashlib.sha256).hexdigest()
+    return f"{ts}.{sig}"
+
+
+def verify_session_token(token: Optional[str]) -> bool:
+    """Valida o token assinado e verifica expiração."""
+    if not token or "." not in token:
+        return False
+    try:
+        parts = token.split(".", 1)
+        if len(parts) != 2:
+            return False
+        ts_str, sig = parts
+        ts = int(ts_str)
+        now = int(time.time())
+        # Rejeita se expirado (> 7 dias) ou se estiver no futuro (> 5 min skew)
+        if (now - ts) > SESSION_MAX_AGE or ts > (now + 300):
+            return False
+        expected_sig = hmac.new(AUTH_SECRET_KEY.encode("utf-8"), ts_str.encode("utf-8"), hashlib.sha256).hexdigest()
+        return secrets.compare_digest(sig, expected_sig)
+    except Exception:
+        return False
+
+
+def is_authenticated(request: Request) -> bool:
+    """Verifica se a requisição possui sessão autenticada válida ou chave mestra."""
+    if os.getenv("DISABLE_AUTH") == "1":
+        return True
+
+    # 1. Cookie HttpOnly assinado
+    cookie_token = request.cookies.get(AUTH_COOKIE_NAME)
+    if cookie_token and verify_session_token(cookie_token):
+        return True
+
+    # 2. Header X-Admin-Key
+    admin_key = request.headers.get("X-Admin-Key")
+    if admin_key and secrets.compare_digest(admin_key, ADMIN_PASSWORD):
+        return True
+
+    # 3. Header Authorization: Bearer <key_or_token>
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        bearer = auth_header[7:].strip()
+        if secrets.compare_digest(bearer, ADMIN_PASSWORD) or verify_session_token(bearer):
+            return True
+
+    return False
+
+
+def require_auth(request: Request):
+    """Exige autenticação administrativa; lança 401 se não autenticado."""
+    if not is_authenticated(request):
+        raise HTTPException(
+            status_code=401,
+            detail="Acesso não autorizado. Autentique-se com a senha mestre.",
+            headers=CACHE_BUST_HEADERS,
+        )
+
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("demo")
@@ -609,6 +681,12 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
           <span><span class="hidden sm:inline">Novo</span> Avulso</span>
         </button>
 
+        <!-- Botão Bloquear Painel (Desktop) -->
+        <button onclick="bloquearPainel()" class="hidden sm:inline-flex items-center gap-1.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 hover:text-zinc-900 border border-zinc-200 text-xs font-semibold px-2.5 py-1.5 rounded-xl transition shrink-0" title="Bloquear acesso ao painel">
+          <i class="fa-solid fa-lock text-[11px] text-zinc-500"></i>
+          <span>Bloquear</span>
+        </button>
+
         <!-- Botão Limpar Tudo (Desktop) -->
         <button onclick="limparTudo()" class="hidden sm:inline-flex items-center gap-1.5 bg-zinc-100 hover:bg-rose-50 text-zinc-500 hover:text-rose-600 border border-zinc-200 text-xs font-medium px-2 py-1.5 rounded-xl transition shrink-0" title="Limpar todos os QR Codes">
           <i class="fa-solid fa-trash-can text-[11px]"></i>
@@ -644,7 +722,11 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
               </div>
             </div>
 
-            <div class="p-1">
+            <div class="p-1 space-y-0.5">
+              <button type="button" onclick="fecharMenuMobile(); bloquearPainel();" class="w-full px-3 py-2 rounded-xl text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-100 flex items-center gap-2.5 transition">
+                <i class="fa-solid fa-lock text-xs text-zinc-500"></i>
+                <span>Bloquear Painel</span>
+              </button>
               <button type="button" onclick="fecharMenuMobile(); limparTudo();" class="w-full px-3 py-2 rounded-xl text-left text-xs font-semibold text-rose-600 hover:bg-rose-50 flex items-center gap-2.5 transition">
                 <i class="fa-solid fa-trash-can text-xs text-rose-500"></i>
                 <span>Limpar Todos os QR Codes</span>
@@ -2105,6 +2187,15 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       });
     }
 
+    async function bloquearPainel() {
+      try {
+        await fetch('/api/auth/logout', { method: 'POST' });
+      } catch (e) {
+        console.error(e);
+      }
+      window.location.reload();
+    }
+
     // Inicialização do tema de fundo do painel
     aplicarFundoDashboard(localStorage.getItem('dashboard_bg_theme') || 'default');
 
@@ -2121,8 +2212,225 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 """
 
 
+# =====================================================================
+# TELA DE BLOQUEIO / AUTENTICAÇÃO EXCLUSIVA DO PAINEL
+# =====================================================================
+LOCK_SCREEN_HTML = r"""<!DOCTYPE html>
+<html lang="pt-BR" class="h-full bg-zinc-950">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>Acesso Restrito — QR Estático</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    body {
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      20%, 60% { transform: translateX(-6px); }
+      40%, 80% { transform: translateX(6px); }
+    }
+    .animate-shake {
+      animation: shake 0.4s ease-in-out;
+    }
+  </style>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-zinc-950 via-zinc-900 to-black text-white flex flex-col items-center justify-center p-4 relative overflow-hidden select-none">
+  <!-- Efeitos de iluminação sutil de fundo -->
+  <div class="absolute -top-32 -left-32 w-80 h-80 bg-indigo-600/15 rounded-full blur-3xl pointer-events-none"></div>
+  <div class="absolute -bottom-32 -right-32 w-80 h-80 bg-purple-600/15 rounded-full blur-3xl pointer-events-none"></div>
+
+  <div class="w-full max-w-sm relative z-10">
+    <!-- Brand Header -->
+    <div class="flex items-center justify-center gap-3 mb-8">
+      <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-600 flex items-center justify-center text-white shadow-lg shadow-indigo-500/25">
+        <i class="fa-solid fa-qrcode text-lg"></i>
+      </div>
+      <div class="flex flex-col">
+        <div class="flex items-center gap-2">
+          <span class="font-bold text-base tracking-tight text-white">QR Estático</span>
+          <span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">100% Permanente</span>
+        </div>
+        <span class="text-[11px] text-zinc-400">Plataforma de Gestão Exclusiva</span>
+      </div>
+    </div>
+
+    <!-- Card de Bloqueio -->
+    <div id="lock-card" class="bg-zinc-900/90 border border-zinc-800 backdrop-blur-2xl p-6 sm:p-8 rounded-3xl shadow-2xl relative">
+      <div class="w-14 h-14 bg-gradient-to-br from-indigo-500/20 to-purple-500/20 border border-indigo-500/30 text-indigo-400 rounded-2xl flex items-center justify-center mx-auto mb-4 text-2xl shadow-inner">
+        <i class="fa-solid fa-lock"></i>
+      </div>
+
+      <h1 class="text-xl font-bold tracking-tight text-center text-white mb-1.5">Painel Bloqueado</h1>
+      <p class="text-xs text-zinc-400 text-center mb-6 leading-relaxed">
+        Digite a senha mestre para desbloquear o gerenciador e acessar seus QR Codes.
+      </p>
+
+      <!-- Alerta de Erro -->
+      <div id="login-error" class="hidden mb-4 p-3 rounded-xl bg-rose-500/10 border border-rose-500/25 text-rose-400 text-xs flex items-center gap-2.5">
+        <i class="fa-solid fa-circle-exclamation text-rose-400 shrink-0"></i>
+        <span id="login-error-msg" class="leading-tight">Senha incorreta. Tente novamente.</span>
+      </div>
+
+      <form id="form-login" onsubmit="realizarLogin(event)" class="space-y-4">
+        <div>
+          <label for="admin-password" class="block text-[11px] font-semibold text-zinc-300 uppercase tracking-wider mb-1.5">
+            Senha do Administrador
+          </label>
+          <div class="relative">
+            <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-zinc-500">
+              <i class="fa-solid fa-key text-xs"></i>
+            </div>
+            <input
+              type="password"
+              id="admin-password"
+              name="password"
+              required
+              autocomplete="current-password"
+              placeholder="Digite sua senha..."
+              class="w-full pl-9 pr-10 py-2.5 bg-zinc-950/70 border border-zinc-800 rounded-xl text-sm text-white placeholder-zinc-500 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition"
+              autofocus
+            />
+            <button
+              type="button"
+              onclick="alternarVisibilidadeSenha()"
+              id="btn-toggle-eye"
+              tabindex="-1"
+              class="absolute inset-y-0 right-0 pr-3.5 flex items-center text-zinc-500 hover:text-zinc-300 transition"
+              title="Mostrar/ocultar senha"
+            >
+              <i class="fa-solid fa-eye text-xs" id="eye-icon"></i>
+            </button>
+          </div>
+        </div>
+
+        <button
+          type="submit"
+          id="btn-submit-login"
+          class="w-full py-2.5 px-4 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold text-sm rounded-xl shadow-lg shadow-indigo-600/25 transition active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer"
+        >
+          <span id="btn-text">Desbloquear Painel</span>
+          <i class="fa-solid fa-arrow-right text-xs" id="btn-icon"></i>
+        </button>
+      </form>
+
+      <div class="mt-6 pt-5 border-t border-zinc-800/80 text-center">
+        <p class="text-[11px] text-zinc-500 flex items-center justify-center gap-1.5">
+          <i class="fa-solid fa-shield-halved text-[10px] text-indigo-400"></i>
+          <span>Acesso protegido por autenticação exclusiva</span>
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function alternarVisibilidadeSenha() {
+      const input = document.getElementById('admin-password');
+      const icon = document.getElementById('eye-icon');
+      if (input.type === 'password') {
+        input.type = 'text';
+        icon.className = 'fa-solid fa-eye-slash text-xs';
+      } else {
+        input.type = 'password';
+        icon.className = 'fa-solid fa-eye text-xs';
+      }
+    }
+
+    async function realizarLogin(e) {
+      e.preventDefault();
+      const input = document.getElementById('admin-password');
+      const errBox = document.getElementById('login-error');
+      const errMsg = document.getElementById('login-error-msg');
+      const card = document.getElementById('lock-card');
+      const btn = document.getElementById('btn-submit-login');
+      const btnText = document.getElementById('btn-text');
+      const btnIcon = document.getElementById('btn-icon');
+
+      const password = (input.value || '').trim();
+      if (!password) return;
+
+      errBox.classList.add('hidden');
+      card.classList.remove('animate-shake');
+      btn.disabled = true;
+      btnText.textContent = 'Verificando...';
+      btnIcon.className = 'fa-solid fa-spinner fa-spin text-xs';
+
+      try {
+        const resp = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: password })
+        });
+
+        if (resp.ok) {
+          btnText.textContent = 'Acesso Liberado!';
+          btnIcon.className = 'fa-solid fa-check text-xs';
+          window.location.reload();
+        } else {
+          const data = await resp.json().catch(() => ({}));
+          errMsg.textContent = data.detail || 'Senha incorreta. Tente novamente.';
+          errBox.classList.remove('hidden');
+          void card.offsetWidth;
+          card.classList.add('animate-shake');
+          input.value = '';
+          input.focus();
+        }
+      } catch (err) {
+        errMsg.textContent = 'Falha ao conectar com o servidor.';
+        errBox.classList.remove('hidden');
+      } finally {
+        btn.disabled = false;
+        btnText.textContent = 'Desbloquear Painel';
+        btnIcon.className = 'fa-solid fa-arrow-right text-xs';
+      }
+    }
+  </script>
+</body>
+</html>
+"""
+
+
+class LoginDTO(BaseModel):
+    password: str
+
+
+@app.post("/api/auth/login")
+async def login_api(dto: LoginDTO, response: Response):
+    if not secrets.compare_digest(dto.password, ADMIN_PASSWORD):
+        raise HTTPException(status_code=401, detail="Senha incorreta. Tente novamente.")
+    token = create_session_token()
+    response.set_cookie(
+        key=AUTH_COOKIE_NAME,
+        value=token,
+        max_age=SESSION_MAX_AGE,
+        httponly=True,
+        samesite="lax",
+        secure=IS_SERVERLESS,
+        path="/",
+    )
+    return {"status": "ok", "message": "Autenticado com sucesso", "token": token}
+
+
+@app.post("/api/auth/logout")
+async def logout_api(response: Response):
+    response.delete_cookie(key=AUTH_COOKIE_NAME, path="/")
+    return {"status": "ok", "message": "Sessão encerrada com sucesso"}
+
+
+@app.get("/api/auth/status")
+async def auth_status_api(request: Request):
+    return {"authenticated": is_authenticated(request)}
+
+
 @app.get("/", response_class=HTMLResponse)
-def dashboard_view():
+def dashboard_view(request: Request):
+    if not is_authenticated(request):
+        return HTMLResponse(LOCK_SCREEN_HTML, headers=CACHE_BUST_HEADERS)
     return HTMLResponse(DASHBOARD_HTML, headers=CACHE_BUST_HEADERS)
 
 
@@ -2380,6 +2688,7 @@ async def list_qrcodes_api(
     status: Optional[str] = None,
     host_override: Optional[str] = None,
 ):
+    require_auth(request)
     await ensure_db_synced()
 
     # Garante purga imediata de quaisquer slugs excluídos
@@ -2427,6 +2736,7 @@ async def list_qrcodes_api(
 
 @app.get("/api/qrcodes/{slug}")
 async def get_qrcode_api(slug: str, request: Request, host_override: Optional[str] = None):
+    require_auth(request)
     clean_slug = slug.strip().lstrip("/").lower()
     if clean_slug in DELETED_SLUGS:
         raise HTTPException(status_code=404, detail="QR Code não encontrado")
@@ -2462,6 +2772,7 @@ async def get_qrcode_api(slug: str, request: Request, host_override: Optional[st
 
 @app.post("/api/qrcodes")
 async def create_qr_api(body: QRCreateDTO, request: Request):
+    require_auth(request)
     clean_slug = body.slug.strip().lstrip("/").lower()
     if clean_slug == "rede-03-85c4":
         raise HTTPException(status_code=400, detail="Este identificador foi excluído e não pode ser recriado.")
@@ -2558,6 +2869,7 @@ async def create_qr_api(body: QRCreateDTO, request: Request):
 
 @app.put("/api/qrcodes/{slug}")
 async def update_qr_api(slug: str, body: QRUpdateDTO, request: Request):
+    require_auth(request)
     clean_slug = slug.strip().lstrip("/").lower()
     if clean_slug in DELETED_SLUGS:
         raise HTTPException(status_code=404, detail="QR Code não encontrado")
@@ -2658,6 +2970,7 @@ async def update_qr_api(slug: str, body: QRUpdateDTO, request: Request):
 
 @app.delete("/api/qrcodes/{slug}")
 async def delete_qr_api(slug: str, request: Request):
+    require_auth(request)
     clean_slug = slug.strip().lstrip("/").lower()
     # Registra tombstone imediatamente e remove do estado em memória
     DELETED_SLUGS.add(clean_slug)
@@ -2706,6 +3019,7 @@ async def delete_qr_api(slug: str, request: Request):
 
 @app.post("/api/qrcodes/clear-all")
 async def clear_all_qrcodes_api(request: Request):
+    require_auth(request)
     current_host = request.headers.get("host", "").split(":")[0].lower()
     hosts_to_sync = set(KNOWN_HOSTS + [current_host])
     all_slugs = set(list(IN_MEMORY_DB.keys()))
@@ -2744,6 +3058,7 @@ async def clear_all_qrcodes_api(request: Request):
 
 @app.post("/api/qrcodes/batch")
 async def create_batch_qr_api(body: QRBatchCreateDTO, request: Request):
+    require_auth(request)
     created = []
     current_host = request.headers.get("host", "").split(":")[0].lower()
     proto = "https" if IS_SERVERLESS or "vercel.app" in current_host else "http"
@@ -2928,6 +3243,7 @@ async def activate_qr_api(slug: str, request: Request):
 
 @app.get("/api/export-batch/pdf-sheet")
 async def export_batch_pdf_sheet(request: Request, prefix: Optional[str] = None, status: Optional[str] = None):
+    require_auth(request)
     await ensure_db_synced()
     slugs = [s for s in list(IN_MEMORY_DB.keys()) if s not in DELETED_SLUGS]
     if prefix:
@@ -3020,6 +3336,7 @@ async def export_batch_pdf_sheet(request: Request, prefix: Optional[str] = None,
 
 @app.get("/api/export-batch/csv")
 async def export_batch_csv(request: Request):
+    require_auth(request)
     await ensure_db_synced()
     active_host = request.headers.get("host", "localhost")
     proto = "https" if IS_SERVERLESS or "vercel.app" in active_host else "http"
@@ -3168,7 +3485,8 @@ async def preview_svg(
 
 
 @app.get("/scans")
-async def list_scans():
+async def list_scans(request: Request):
+    require_auth(request)
     clicks_map = dict(SCAN_COUNTS)
     if REDIS_URL and redis_async:
         try:
@@ -3214,6 +3532,7 @@ async def export_qr(
     frame: Optional[str] = None,
     style: Optional[str] = None,
 ):
+    require_auth(request)
     clean_slug = slug.strip().lstrip("/").lower()
     active_host = host_override or request.headers.get("host", "localhost")
 
