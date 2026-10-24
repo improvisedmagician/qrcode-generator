@@ -629,10 +629,39 @@ def test_health_check_and_clear_all(client):
     assert len(resp_list.json()) == 0
 
 
+def test_natural_numeric_sorting_order(client):
+    from run_standalone import IN_MEMORY_DB, DELETED_SLUGS
+    # Limpa estado para o teste
+    IN_MEMORY_DB.clear()
+    DELETED_SLUGS.clear()
 
+    # Adiciona itens fora de ordem
+    items = [
+        ("mesa-10", "Mesa #10"),
+        ("mesa-01", "Mesa #1"),
+        ("mesa-06", "Mesa #6"),
+        ("mesa-02", "Mesa #2"),
+        ("mesa-03", "Mesa #3"),
+    ]
+    for slug, name in items:
+        IN_MEMORY_DB[slug] = {
+            "name": name,
+            "status": "unclaimed",
+            "default_url": "",
+            "design": {},
+            "rules": [],
+            "created_at": "2026-01-01T00:00:00Z",
+        }
 
+    resp = client.get("/api/qrcodes?search=Mesa")
+    assert resp.status_code == 200
+    data = resp.json()
+    names = [item["name"] for item in data if "Mesa" in item["name"]]
+    assert names == ["Mesa #1", "Mesa #2", "Mesa #3", "Mesa #6", "Mesa #10"]
 
-
-
-
+    # Verifica também presença dos elementos no HTML
+    resp_dash = client.get("/")
+    assert resp_dash.status_code == 200
+    assert "select-ordenacao" in resp_dash.text
+    assert "compararQRs" in resp_dash.text
 

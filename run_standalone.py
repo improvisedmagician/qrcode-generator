@@ -683,13 +683,22 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
           </button>
         </div>
 
-        <div class="flex items-center space-x-1 bg-zinc-100 p-0.5 rounded-xl border border-zinc-200 text-xs shrink-0">
-          <button onclick="alternarModoVisualizacao('grid')" id="btn-view-grid" class="p-1.5 px-2 rounded-lg bg-white text-zinc-900 shadow-2xs transition" title="Cards">
-            <i class="fa-solid fa-table-cells-large text-xs"></i>
-          </button>
-          <button onclick="alternarModoVisualizacao('list')" id="btn-view-list" class="p-1.5 px-2 rounded-lg text-zinc-500 hover:text-zinc-900 transition" title="Lista">
-            <i class="fa-solid fa-bars text-xs"></i>
-          </button>
+        <div class="flex items-center space-x-1.5 shrink-0">
+          <select id="select-ordenacao" onchange="alternarOrdenacao(this.value)" class="text-xs bg-white rounded-xl border border-zinc-200/80 px-2.5 py-1.5 outline-none font-medium text-zinc-700 shadow-2xs hover:border-zinc-300 transition cursor-pointer" title="Critério de ordenação dos códigos">
+            <option value="natural">Ordem Numérica (1, 2, 3...)</option>
+            <option value="recentes">Mais Recentes</option>
+            <option value="scans">Mais Scans</option>
+            <option value="za">Nome (Z - A)</option>
+          </select>
+
+          <div class="flex items-center space-x-1 bg-zinc-100 p-0.5 rounded-xl border border-zinc-200 text-xs shrink-0">
+            <button onclick="alternarModoVisualizacao('grid')" id="btn-view-grid" class="p-1.5 px-2 rounded-lg bg-white text-zinc-900 shadow-2xs transition" title="Cards">
+              <i class="fa-solid fa-table-cells-large text-xs"></i>
+            </button>
+            <button onclick="alternarModoVisualizacao('list')" id="btn-view-list" class="p-1.5 px-2 rounded-lg text-zinc-500 hover:text-zinc-900 transition" title="Lista">
+              <i class="fa-solid fa-bars text-xs"></i>
+            </button>
+          </div>
         </div>
       </div>
     </section>
@@ -967,6 +976,40 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     let modoVisualizacao = 'grid'; // 'grid' ou 'list'
     let todosQRs = [];
     let filtroAtualStatus = 'all';
+    let ordenacaoAtual = 'natural';
+    try {
+      ordenacaoAtual = localStorage.getItem('qr_sort_order') || 'natural';
+    } catch (e) {}
+
+    function compararQRs(a, b) {
+      if (ordenacaoAtual === 'recentes') {
+        const tA = new Date(a.created_at || 0).getTime();
+        const tB = new Date(b.created_at || 0).getTime();
+        if (tA !== tB) return tB - tA;
+      } else if (ordenacaoAtual === 'scans') {
+        const cA = Number(a.clicks || 0);
+        const cB = Number(b.clicks || 0);
+        if (cA !== cB) return cB - cA;
+      } else if (ordenacaoAtual === 'za') {
+        const nameA = String(a.name || a.slug || '');
+        const nameB = String(b.name || b.slug || '');
+        return nameB.localeCompare(nameA, undefined, { numeric: true, sensitivity: 'base' });
+      }
+
+      // Padrão: Ordem Numérica Natural (1, 2, 3...)
+      const nameA = String(a.name || a.slug || '');
+      const nameB = String(b.name || b.slug || '');
+      const cmp = nameA.localeCompare(nameB, undefined, { numeric: true, sensitivity: 'base' });
+      if (cmp !== 0) return cmp;
+      return String(a.slug || '').localeCompare(String(b.slug || ''), undefined, { numeric: true });
+    }
+
+    function alternarOrdenacao(modo) {
+      ordenacaoAtual = modo;
+      try { localStorage.setItem('qr_sort_order', modo); } catch (e) {}
+      filtrarQRs();
+    }
+
     const deletedSlugsCache = new Set(['rede-03-85c4']);
 
     // Purga definitiva de caches e dados zumbis de versoes legadas: o Redis online e a unica fonte da verdade
@@ -977,7 +1020,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       localStorage.removeItem('qr_clicks');
       for (let i = localStorage.length - 1; i >= 0; i--) {
         const k = localStorage.key(i);
-        if (k && (k.includes('custom') || k.includes('rede-03') || k.includes('qr'))) {
+        if (k && (k.includes('custom') || k.includes('rede-03'))) {
           localStorage.removeItem(k);
         }
       }
@@ -1275,6 +1318,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
             const clicks = Math.max(mergedClicks[k] || 0, Number(q.clicks) || 0);
             return { ...q, clicks };
           });
+        todosQRs.sort(compararQRs);
 
         // Mescla scans do servidor com o cache do localStorage para estabilidade serverless
         const existingScans = getStoredScans();
@@ -1438,6 +1482,8 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       const cAct = document.getElementById('count-active'); if (cAct) cAct.innerText = ativos;
       const cUnc = document.getElementById('count-unclaimed'); if (cUnc) cUnc.innerText = virgens;
       const cPau = document.getElementById('count-paused'); if (cPau) cPau.innerText = pausados;
+
+      filtrados.sort(compararQRs);
 
       if (modoVisualizacao === 'grid') {
         renderizarQRCards(filtrados);
@@ -1989,6 +2035,10 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     // Inicialização do tema de fundo do painel
     aplicarFundoDashboard(localStorage.getItem('dashboard_bg_theme') || 'default');
 
+    // Inicialização do seletor de ordenação
+    const selOrd = document.getElementById('select-ordenacao');
+    if (selOrd) selOrd.value = ordenacaoAtual;
+
     // Inicialização e Polling de Scans a cada 2.5s
     carregarDashboard();
     setInterval(carregarDashboard, 2500);
@@ -2192,6 +2242,14 @@ async def health_check():
     }
 
 
+def natural_sort_key(item: dict) -> tuple:
+    name = str(item.get("name") or item.get("slug") or "")
+    slug = str(item.get("slug") or "")
+    parts = [int(text) if text.isdigit() else text.lower() for text in re.split(r"(\d+)", name)]
+    slug_parts = [int(text) if text.isdigit() else text.lower() for text in re.split(r"(\d+)", slug)]
+    return (parts, slug_parts)
+
+
 @app.get("/api/qrcodes")
 async def list_qrcodes_api(
     request: Request,
@@ -2258,6 +2316,7 @@ async def list_qrcodes_api(
                 "created_at": payload.get("created_at"),
             }
         )
+    result.sort(key=natural_sort_key)
     return JSONResponse(result, headers=CACHE_BUST_HEADERS)
 
 
@@ -2769,6 +2828,7 @@ async def export_batch_pdf_sheet(request: Request, prefix: Optional[str] = None,
         slugs = [s for s in slugs if s.startswith(prefix.strip().lower())]
     if status and status != "all":
         slugs = [s for s in slugs if IN_MEMORY_DB.get(s, {}).get("status") == status]
+    slugs = sorted(slugs, key=lambda s: natural_sort_key({"name": IN_MEMORY_DB.get(s, {}).get("name"), "slug": s}))
 
     if not slugs:
         raise HTTPException(status_code=404, detail="Nenhum QR Code encontrado para gerar folha de impressão.")
@@ -2859,16 +2919,19 @@ async def export_batch_csv(request: Request):
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["Slug", "Nome", "Status", "Link Curto Impresso", "URL Destino Atual", "Data Criacao"])
-    for s, p in IN_MEMORY_DB.items():
-        if s not in DELETED_SLUGS:
-            writer.writerow([
-                s,
-                p.get("name", s),
-                p.get("status", "active"),
-                f"{proto}://{active_host}/{s}",
-                p.get("default_url", ""),
-                p.get("created_at", ""),
-            ])
+    items_to_export = sorted(
+        [(s, p) for s, p in IN_MEMORY_DB.items() if s not in DELETED_SLUGS],
+        key=lambda pair: natural_sort_key({"name": pair[1].get("name"), "slug": pair[0]})
+    )
+    for s, p in items_to_export:
+        writer.writerow([
+            s,
+            p.get("name", s),
+            p.get("status", "active"),
+            f"{proto}://{active_host}/{s}",
+            p.get("default_url", ""),
+            p.get("created_at", ""),
+        ])
     return Response(
         content=output.getvalue().encode("utf-8-sig"),
         media_type="text/csv",
