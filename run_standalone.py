@@ -570,12 +570,12 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
             <!-- Opções de Fundo no Mobile -->
             <div class="p-2 space-y-1">
               <span class="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block px-1">Fundo da Tela</span>
-              <div class="grid grid-cols-5 gap-1.5 px-1 py-1">
-                <button type="button" onclick="aplicarFundoDashboard('default'); fecharMenuMobile();" class="w-6 h-6 rounded-full bg-zinc-200 border border-zinc-300" title="Padrão"></button>
-                <button type="button" onclick="aplicarFundoDashboard('aurora'); fecharMenuMobile();" class="w-6 h-6 rounded-full bg-gradient-to-tr from-teal-200 via-indigo-200 to-purple-200 border border-teal-300" title="Aurora"></button>
-                <button type="button" onclick="aplicarFundoDashboard('sunset'); fecharMenuMobile();" class="w-6 h-6 rounded-full bg-gradient-to-tr from-amber-200 via-rose-200 to-indigo-200 border border-amber-300" title="Sunset"></button>
-                <button type="button" onclick="aplicarFundoDashboard('mesh'); fecharMenuMobile();" class="w-6 h-6 rounded-full bg-gradient-to-tr from-indigo-300 via-purple-300 to-pink-300 border border-indigo-300" title="Cyber"></button>
-                <button type="button" onclick="aplicarFundoDashboard('dark'); fecharMenuMobile();" class="w-6 h-6 rounded-full bg-gradient-to-tr from-slate-900 via-indigo-950 to-zinc-900 border border-zinc-500" title="Dark"></button>
+              <div class="grid grid-cols-5 gap-2 px-1 py-1.5 items-center justify-items-center">
+                <button type="button" id="btn-bg-mob-default" onclick="aplicarFundoDashboard('default'); fecharMenuMobile();" class="w-7 h-7 rounded-full bg-slate-100 border-2 border-slate-300 transition-all transform active:scale-95 shadow-xs" title="Padrão"></button>
+                <button type="button" id="btn-bg-mob-aurora" onclick="aplicarFundoDashboard('aurora'); fecharMenuMobile();" class="w-7 h-7 rounded-full bg-gradient-to-tr from-teal-200 via-indigo-200 to-purple-200 border-2 border-teal-300 transition-all transform active:scale-95 shadow-xs" title="Aurora"></button>
+                <button type="button" id="btn-bg-mob-sunset" onclick="aplicarFundoDashboard('sunset'); fecharMenuMobile();" class="w-7 h-7 rounded-full bg-gradient-to-tr from-amber-200 via-rose-200 to-indigo-200 border-2 border-amber-300 transition-all transform active:scale-95 shadow-xs" title="Sunset"></button>
+                <button type="button" id="btn-bg-mob-mesh" onclick="aplicarFundoDashboard('mesh'); fecharMenuMobile();" class="w-7 h-7 rounded-full bg-gradient-to-tr from-indigo-300 via-purple-300 to-pink-300 border-2 border-indigo-300 transition-all transform active:scale-95 shadow-xs" title="Cyber"></button>
+                <button type="button" id="btn-bg-mob-dark" onclick="aplicarFundoDashboard('dark'); fecharMenuMobile();" class="w-7 h-7 rounded-full bg-gradient-to-tr from-slate-900 via-indigo-950 to-zinc-900 border-2 border-zinc-500 transition-all transform active:scale-95 shadow-xs" title="Dark"></button>
               </div>
             </div>
 
@@ -688,11 +688,6 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
             <i class="fa-solid fa-table-cells-large text-xs"></i>
           </button>
           <button onclick="alternarModoVisualizacao('list')" id="btn-view-list" class="p-1.5 px-2 rounded-lg text-zinc-500 hover:text-zinc-900 transition" title="Lista">
-            <i class="fa-solid fa-bars text-xs"></i>
-          </button>
-        </div>
-      </div>
-    </section>
             <i class="fa-solid fa-bars text-xs"></i>
           </button>
         </div>
@@ -852,14 +847,14 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 
                 <!-- Fundo Sólido -->
                 <div id="secao-fundo-solido" class="flex items-center space-x-2">
-                  <input type="color" id="input-bg-cor" value="#FFFFFF" class="w-8 h-7 rounded border border-zinc-200 p-0.5 cursor-pointer shrink-0" onchange="atualizarPreviewLive()">
-                  <div class="flex items-center space-x-1 flex-wrap">
-                    <button type="button" onclick="setBgCor('#FFFFFF')" class="w-4 h-4 rounded-full bg-[#FFFFFF] border border-zinc-300 shadow-2xs" title="Branco"></button>
-                    <button type="button" onclick="setBgCor('#F8FAFC')" class="w-4 h-4 rounded-full bg-[#F8FAFC] border border-zinc-300" title="Gelo"></button>
-                    <button type="button" onclick="setBgCor('#FEF9C3')" class="w-4 h-4 rounded-full bg-[#FEF9C3] border border-zinc-300" title="Creme"></button>
-                    <button type="button" onclick="setBgCor('#ECFDF5')" class="w-4 h-4 rounded-full bg-[#ECFDF5] border border-zinc-300" title="Menta"></button>
-                    <button type="button" onclick="setBgCor('#F5F3FF')" class="w-4 h-4 rounded-full bg-[#F5F3FF] border border-zinc-300" title="Lavanda"></button>
-                    <button type="button" onclick="setBgCor('#EFF6FF')" class="w-4 h-4 rounded-full bg-[#EFF6FF] border border-zinc-300" title="Céu"></button>
+                  <input type="color" id="input-bg-cor" value="#FFFFFF" class="w-8 h-8 rounded-lg border border-zinc-200 p-0.5 cursor-pointer shrink-0" oninput="atualizarPreviewLive()" onchange="atualizarPreviewLive()">
+                  <div class="flex items-center space-x-1.5 flex-wrap">
+                    <button type="button" onclick="setBgCor('#FFFFFF')" class="w-6 h-6 rounded-full bg-[#FFFFFF] border border-zinc-300 shadow-2xs transition transform hover:scale-110 active:scale-95" title="Branco"></button>
+                    <button type="button" onclick="setBgCor('#F8FAFC')" class="w-6 h-6 rounded-full bg-[#F8FAFC] border border-zinc-300 shadow-2xs transition transform hover:scale-110 active:scale-95" title="Gelo"></button>
+                    <button type="button" onclick="setBgCor('#FEF9C3')" class="w-6 h-6 rounded-full bg-[#FEF9C3] border border-zinc-300 shadow-2xs transition transform hover:scale-110 active:scale-95" title="Creme"></button>
+                    <button type="button" onclick="setBgCor('#ECFDF5')" class="w-6 h-6 rounded-full bg-[#ECFDF5] border border-zinc-300 shadow-2xs transition transform hover:scale-110 active:scale-95" title="Menta"></button>
+                    <button type="button" onclick="setBgCor('#F5F3FF')" class="w-6 h-6 rounded-full bg-[#F5F3FF] border border-zinc-300 shadow-2xs transition transform hover:scale-110 active:scale-95" title="Lavanda"></button>
+                    <button type="button" onclick="setBgCor('#EFF6FF')" class="w-6 h-6 rounded-full bg-[#EFF6FF] border border-zinc-300 shadow-2xs transition transform hover:scale-110 active:scale-95" title="Céu"></button>
                   </div>
                   <span class="text-[10px] text-zinc-400 ml-auto hidden sm:inline">Tons claros seguros</span>
                 </div>
@@ -869,7 +864,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
                   <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <div>
                       <label class="block text-[10px] text-zinc-500 mb-0.5 font-medium">Preset de Gradiente</label>
-                      <select id="select-gradiente-preset" class="w-full text-xs rounded-lg border border-zinc-200 px-2 py-1 outline-none bg-white" onchange="selecionarPresetGradiente(this.value)">
+                      <select id="select-gradiente-preset" class="w-full text-xs rounded-lg border border-zinc-200 px-2.5 py-1.5 outline-none bg-white" onchange="selecionarPresetGradiente(this.value)">
                         <option value="sunset">🌅 Sunset Suave</option>
                         <option value="aurora">🌌 Aurora Boreal</option>
                         <option value="cotton">🌸 Algodão Doce</option>
@@ -881,9 +876,9 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
                     <div>
                       <label class="block text-[10px] text-zinc-500 mb-0.5 font-medium">Início ➔ Fim (135°)</label>
                       <div class="flex items-center space-x-1.5">
-                        <input type="color" id="input-grad-c1" value="#FFF1EB" class="w-8 h-7 rounded border border-zinc-200 p-0.5 cursor-pointer shrink-0" onchange="atualizarPreviewLive()">
+                        <input type="color" id="input-grad-c1" value="#FFF1EB" class="w-8 h-8 rounded-lg border border-zinc-200 p-0.5 cursor-pointer shrink-0" oninput="atualizarPreviewLive()" onchange="atualizarPreviewLive()">
                         <i class="fa-solid fa-arrow-right text-[9px] text-zinc-400"></i>
-                        <input type="color" id="input-grad-c2" value="#ACE0F9" class="w-8 h-7 rounded border border-zinc-200 p-0.5 cursor-pointer shrink-0" onchange="atualizarPreviewLive()">
+                        <input type="color" id="input-grad-c2" value="#ACE0F9" class="w-8 h-8 rounded-lg border border-zinc-200 p-0.5 cursor-pointer shrink-0" oninput="atualizarPreviewLive()" onchange="atualizarPreviewLive()">
                         <span class="text-[10px] text-zinc-400 font-mono">135°</span>
                       </div>
                     </div>
@@ -1084,6 +1079,24 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       dark: ['bg-gradient-to-br', 'from-slate-950', 'via-zinc-900', 'to-indigo-950', 'bg-fixed']
     };
 
+    const THEME_STYLES = {
+      default: {
+        bg: '#f8fafc',
+      },
+      aurora: {
+        bg: 'linear-gradient(135deg, #e0f2fe 0%, #ecfdf5 45%, #ede9fe 100%)',
+      },
+      sunset: {
+        bg: 'linear-gradient(135deg, #ffedd5 0%, #ffe4e6 50%, #e0e7ff 100%)',
+      },
+      mesh: {
+        bg: 'linear-gradient(135deg, #e0e7ff 0%, #f3e8ff 50%, #fce7f3 100%)',
+      },
+      dark: {
+        bg: 'linear-gradient(135deg, #090d16 0%, #0f172a 50%, #1e1b4b 100%)',
+      }
+    };
+
     function toggleMenuFundo(event) {
       if (event) event.stopPropagation();
       fecharMenuMobile();
@@ -1121,7 +1134,19 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     });
 
     function aplicarFundoDashboard(theme) {
+      theme = THEME_STYLES[theme] ? theme : 'default';
       localStorage.setItem('dashboard_bg_theme', theme);
+
+      const themeObj = THEME_STYLES[theme];
+      if (document.documentElement) {
+        document.documentElement.style.background = themeObj.bg;
+        document.documentElement.style.transition = 'background 0.3s ease';
+      }
+      if (document.body) {
+        document.body.style.background = themeObj.bg;
+        document.body.style.transition = 'background 0.3s ease';
+      }
+
       const body = document.body;
       const allClassList = [
         'bg-zinc-50/80', 'bg-fixed', 'bg-gradient-to-br',
@@ -1137,6 +1162,14 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       ['default', 'aurora', 'sunset', 'mesh', 'dark'].forEach(t => {
         const el = document.getElementById('check-bg-' + t);
         if (el) el.classList.toggle('hidden', t !== theme);
+        const mobEl = document.getElementById('btn-bg-mob-' + t);
+        if (mobEl) {
+          if (t === theme) {
+            mobEl.classList.add('ring-2', 'ring-indigo-600', 'ring-offset-2', 'scale-110');
+          } else {
+            mobEl.classList.remove('ring-2', 'ring-indigo-600', 'ring-offset-2', 'scale-110');
+          }
+        }
       });
       fecharMenuFundo();
     }
@@ -1445,7 +1478,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         const bgEndParam = encodeURIComponent(d.background_color_end || '');
         const frameParam = encodeURIComponent(d.frame_text || 'ESCANEIE AQUI');
         const styleParam = encodeURIComponent(d.module_style || 'rounded');
-        const vParam = `${qr.v || 1}_${(d.foreground || '').replace('#', '')}_${(d.background || '').replace('#', '')}`;
+        const vParam = `${qr.v || 1}_${(d.foreground || '').replace('#', '')}_${(d.background || '').replace('#', '')}_${d.background_type || 'solid'}_${(d.background_color_end || '').replace('#', '')}`;
         const qrImgUrl = `/preview/${encodeURIComponent(qr.slug)}.svg?host_override=${encodeURIComponent(activeHost)}&v=${encodeURIComponent(vParam)}&color=${fgParam}&bg_color=${bgParam}&bg_type=${bgTypeParam}&bg_color_end=${bgEndParam}&frame=${frameParam}&style=${styleParam}`;
         const liveFallbackUrl = `/api/preview-live?slug=${encodeURIComponent(qr.slug)}&url=${encodeURIComponent(qr.default_url || '')}&color=${fgParam}&bg_color=${bgParam}&bg_type=${bgTypeParam}&bg_color_end=${bgEndParam}&frame=${frameParam}&style=${styleParam}&host=${encodeURIComponent(activeHost)}`;
         const jsLiveFallbackUrl = escapeJs(liveFallbackUrl);
@@ -1551,7 +1584,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         const bgEndParam = encodeURIComponent(d.background_color_end || '');
         const frameParam = encodeURIComponent(d.frame_text || 'ESCANEIE AQUI');
         const styleParam = encodeURIComponent(d.module_style || 'rounded');
-        const vParam = `${qr.v || 1}_${(d.foreground || '').replace('#', '')}_${(d.background || '').replace('#', '')}`;
+        const vParam = `${qr.v || 1}_${(d.foreground || '').replace('#', '')}_${(d.background || '').replace('#', '')}_${d.background_type || 'solid'}_${(d.background_color_end || '').replace('#', '')}`;
         const qrImgUrl = `/preview/${encodeURIComponent(qr.slug)}.svg?host_override=${encodeURIComponent(activeHost)}&v=${encodeURIComponent(vParam)}&color=${fgParam}&bg_color=${bgParam}&bg_type=${bgTypeParam}&bg_color_end=${bgEndParam}&frame=${frameParam}&style=${styleParam}`;
         const liveFallbackUrl = `/api/preview-live?slug=${encodeURIComponent(qr.slug)}&url=${encodeURIComponent(qr.default_url || '')}&color=${fgParam}&bg_color=${bgParam}&bg_type=${bgTypeParam}&bg_color_end=${bgEndParam}&frame=${frameParam}&style=${styleParam}&host=${encodeURIComponent(activeHost)}`;
         const jsLiveFallbackUrl = escapeJs(liveFallbackUrl);
@@ -1700,6 +1733,14 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       if (bgType === 'gradient' && d.background_color_end) {
         document.getElementById('input-grad-c1').value = d.background || "#FFF1EB";
         document.getElementById('input-grad-c2').value = d.background_color_end || "#ACE0F9";
+        let foundPreset = 'custom';
+        for (const [pKey, [c1, c2]] of Object.entries(PRESETS_GRADIENTE)) {
+          if (c1.toLowerCase() === (d.background || '').toLowerCase() && c2.toLowerCase() === (d.background_color_end || '').toLowerCase()) {
+            foundPreset = pKey;
+            break;
+          }
+        }
+        document.getElementById('select-gradiente-preset').value = foundPreset;
       }
 
       const btnExcluir = document.getElementById('btn-modal-excluir');
@@ -1824,6 +1865,16 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       const modoBg = tipoFundoAtual;
       const bgCor = modoBg === 'gradient' ? document.getElementById('input-grad-c1').value : document.getElementById('input-bg-cor').value;
       const bgCorEnd = modoBg === 'gradient' ? document.getElementById('input-grad-c2').value : null;
+
+      const cor = document.getElementById('input-cor').value;
+      const ratio1 = calcularContraste(cor, bgCor);
+      const ratio2 = (modoBg === 'gradient' && bgCorEnd) ? calcularContraste(cor, bgCorEnd) : ratio1;
+      const minRatio = Math.min(ratio1, ratio2);
+      if (minRatio < 1.35) {
+        if (!confirm('Atenção: O contraste entre a cor do código e o fundo está muito baixo (' + minRatio.toFixed(1) + ':1). Isso pode impedir que a câmera do celular leia o QR Code.\n\nDeseja salvar mesmo assim?')) {
+          return;
+        }
+      }
 
       const payload = {
         name: document.getElementById('input-nome').value.trim(),
@@ -2337,6 +2388,7 @@ async def create_qr_api(body: QRCreateDTO, request: Request):
     except Exception as exc:
         log.warning("Sincronização Redis offline ou ignorada: %r", exc)
 
+    save_local_db()
     return {"status": "created", "slug": clean_slug}
 
 
@@ -2436,6 +2488,7 @@ async def update_qr_api(slug: str, body: QRUpdateDTO, request: Request):
     except Exception as exc:
         log.warning("Sincronização Redis offline ou ignorada: %r", exc)
 
+    save_local_db()
     return {"status": "updated", "slug": clean_slug, "data": item}
 
 
@@ -2905,24 +2958,15 @@ async def preview_svg(
             pass
 
     payload = IN_MEMORY_DB.get(clean_slug)
-    if payload:
-        design_data = payload.get("design", {})
-        fg_col = design_data.get("foreground", "#0F172A")
-        bg_col = design_data.get("background", "#FFFFFF")
-        bg_t = design_data.get("background_type", "solid")
-        bg_end = design_data.get("background_color_end")
-        m_style = design_data.get("module_style", "rounded")
-        f_style = design_data.get("finder_style", "rounded" if m_style == "rounded" else "square")
-        f_text = design_data.get("frame_text", "ESCANEIE AQUI")
-    else:
-        # Fallback apenas para slugs não encontrados no banco
-        fg_col = color or "#0F172A"
-        bg_col = bg_color or "#FFFFFF"
-        bg_t = bg_type or ("gradient" if bg_color_end else "solid")
-        bg_end = bg_color_end
-        m_style = style or "rounded"
-        f_style = "rounded" if m_style == "rounded" else "square"
-        f_text = frame or "ESCANEIE AQUI"
+    design_data = payload.get("design", {}) if payload else {}
+
+    fg_col = color or design_data.get("foreground", "#0F172A")
+    bg_col = bg_color or design_data.get("background", "#FFFFFF")
+    bg_t = bg_type or design_data.get("background_type", "solid")
+    bg_end = bg_color_end if bg_color_end is not None else design_data.get("background_color_end")
+    m_style = style or design_data.get("module_style", "rounded")
+    f_style = design_data.get("finder_style", "rounded" if m_style == "rounded" else "square")
+    f_text = frame if frame is not None else design_data.get("frame_text", "ESCANEIE AQUI")
 
     try:
         validate(QRDesign(foreground=fg_col, background=bg_col))
@@ -2950,7 +2994,7 @@ async def preview_svg(
     if bg_t == "gradient" and bg_end:
         svg_bytes = apply_svg_gradient(svg_bytes, bg_col, bg_end)
 
-    return Response(content=svg_bytes, media_type="image/svg+xml")
+    return Response(content=svg_bytes, media_type="image/svg+xml", headers=CACHE_BUST_HEADERS)
 
 
 @app.get("/scans")
@@ -3012,23 +3056,14 @@ async def export_qr(
             pass
 
     payload = IN_MEMORY_DB.get(clean_slug)
-    if payload:
-        design_data = payload.get("design", {})
-        fg_col = design_data.get("foreground", "#0F172A")
-        bg_col = design_data.get("background", "#FFFFFF")
-        bg_t = design_data.get("background_type", "solid")
-        bg_end = design_data.get("background_color_end")
-        m_style = design_data.get("module_style", "rounded")
-        f_style = design_data.get("finder_style", "rounded" if m_style == "rounded" else "square")
-        f_text = design_data.get("frame_text", "ESCANEIE AQUI")
-    else:
-        fg_col = color or "#0F172A"
-        bg_col = bg_color or "#FFFFFF"
-        bg_t = bg_type or ("gradient" if bg_color_end else "solid")
-        bg_end = bg_color_end
-        m_style = style or "rounded"
-        f_style = "rounded" if m_style == "rounded" else "square"
-        f_text = frame or "ESCANEIE AQUI"
+    design_data = payload.get("design", {}) if payload else {}
+    fg_col = color or design_data.get("foreground", "#0F172A")
+    bg_col = bg_color or design_data.get("background", "#FFFFFF")
+    bg_t = bg_type or design_data.get("background_type", "solid")
+    bg_end = bg_color_end if bg_color_end is not None else design_data.get("background_color_end")
+    m_style = style or design_data.get("module_style", "rounded")
+    f_style = design_data.get("finder_style", "rounded" if m_style == "rounded" else "square")
+    f_text = frame if frame is not None else design_data.get("frame_text", "ESCANEIE AQUI")
 
     design = QRDesign(
         foreground=fg_col,

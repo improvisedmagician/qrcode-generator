@@ -392,11 +392,13 @@ def test_clicks_counting_per_qrcode(client):
 
 
 def test_qr_and_dashboard_gradient_background(client):
-    # 1. Verifica se a interface possui o seletor de fundo
+    # 1. Verifica se a interface possui o seletor de fundo (desktop e mobile)
     resp_dash = client.get("/")
     assert resp_dash.status_code == 200
     assert "btn-menu-fundo" in resp_dash.text
     assert "dropdown-fundo" in resp_dash.text
+    assert "btn-bg-mob-aurora" in resp_dash.text
+    assert "btn-bg-mob-sunset" in resp_dash.text
     assert "aplicarFundoDashboard" in resp_dash.text
     assert "Gradiente Aurora" in resp_dash.text
 
@@ -429,14 +431,22 @@ def test_qr_and_dashboard_gradient_background(client):
     assert resp_create.status_code == 200
     assert resp_create.json()["status"] == "created"
 
-    # 4. Preview SVG do QR Code criado deve conter o gradiente
+    # 4. Preview SVG do QR Code criado deve conter o gradiente e headers anti-cache
     resp_prev = client.get(f"/preview/{grad_slug}.svg")
     assert resp_prev.status_code == 200
     assert resp_prev.headers["content-type"] == "image/svg+xml"
+    assert "no-cache" in resp_prev.headers.get("cache-control", "")
     assert "<linearGradient id=\"qr-bg-grad\"" in resp_prev.text
     assert "url(#qr-bg-grad)" in resp_prev.text
 
-    # 5. Exportação SVG e PNG com fundo gradiente
+    # 5. Sobrescrita de background por query param em slug existente (estabilidade serverless)
+    resp_override = client.get(
+        "/preview/cardapio.svg?bg_type=gradient&bg_color=%23FFF1EB&bg_color_end=%23ACE0F9"
+    )
+    assert resp_override.status_code == 200
+    assert "<linearGradient id=\"qr-bg-grad\"" in resp_override.text
+
+    # 6. Exportação SVG e PNG com fundo gradiente
     resp_exp_svg = client.get(f"/export/{grad_slug}?format=svg")
     assert resp_exp_svg.status_code == 200
     assert "<linearGradient id=\"qr-bg-grad\"" in resp_exp_svg.text
@@ -444,6 +454,13 @@ def test_qr_and_dashboard_gradient_background(client):
     resp_exp_png = client.get(f"/export/{grad_slug}?format=png&size=256")
     assert resp_exp_png.status_code == 200
     assert resp_exp_png.headers["content-type"] == "image/png"
+
+    # Export com override de query params
+    resp_exp_override = client.get(
+        "/export/cardapio?format=svg&bg_type=gradient&bg_color=%23FFF1EB&bg_color_end=%23ACE0F9"
+    )
+    assert resp_exp_override.status_code == 200
+    assert "<linearGradient id=\"qr-bg-grad\"" in resp_exp_override.text
 
 
 def test_batch_generation_and_unclaimed_state(client):
