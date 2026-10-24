@@ -434,20 +434,31 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
     ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+    /* Utilitário para rolagem horizontal sem barra de rolagem (mobile tabs) */
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+    /* Prevenção de auto-zoom indesejado no iOS Safari ao tocar em inputs */
+    @media (max-width: 640px) {
+      input, select, textarea {
+        font-size: 16px !important;
+      }
+    }
   </style>
 </head>
-<body class="min-h-full font-sans text-zinc-900 antialiased flex flex-col">
+<body class="min-h-full font-sans text-zinc-900 antialiased flex flex-col overflow-x-hidden">
 
   <!-- Navbar Compacta e Funcional (56px) -->
   <header class="bg-white/95 backdrop-blur-md border-b border-zinc-200/80 sticky top-0 z-30 shadow-2xs transition-colors">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-3">
+    <div class="max-w-7xl mx-auto px-3 sm:px-6 h-14 flex items-center justify-between gap-2 sm:gap-3">
       
       <!-- Brand & Status -->
-      <div class="flex items-center space-x-3 shrink-0">
-        <div class="w-8 h-8 rounded-lg bg-zinc-900 flex items-center justify-center text-white text-sm shadow-xs">
+      <div class="flex items-center space-x-2 sm:space-x-3 shrink-0">
+        <div class="w-8 h-8 rounded-lg bg-zinc-900 flex items-center justify-center text-white text-sm shadow-xs shrink-0">
           <i class="fa-solid fa-qrcode"></i>
         </div>
-        <div class="flex items-center space-x-2">
+        <div class="flex items-center space-x-1.5 sm:space-x-2">
           <span class="font-bold text-sm tracking-tight text-zinc-900">QR Estático</span>
           <span class="hidden sm:inline-block text-[9px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded border border-emerald-200">100% Permanente</span>
         </div>
@@ -456,15 +467,15 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       <!-- Botões de Ação -->
       <div class="flex items-center space-x-1.5 sm:space-x-2 shrink-0">
         <div class="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/60">
-          <i class="fa-solid fa-infinity text-emerald-600 text-[10px]"></i>
-          Sem Servidor • Nunca Expira
+          <i class="fa-solid fa-bolt text-emerald-600 text-[10px]"></i>
+          1º Scan Ativa • Controle Total
         </div>
 
-        <!-- Seletor de Fundo do Dashboard -->
-        <div class="relative" id="container-seletor-fundo">
+        <!-- Seletor de Fundo do Dashboard (Desktop) -->
+        <div class="relative hidden sm:block" id="container-seletor-fundo">
           <button type="button" onclick="toggleMenuFundo(event)" id="btn-menu-fundo" class="inline-flex items-center gap-1.5 bg-zinc-100 hover:bg-zinc-200/80 text-zinc-700 border border-zinc-200 text-xs font-semibold px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl transition active:scale-95" title="Mudar plano de fundo do painel">
             <i class="fa-solid fa-palette text-indigo-600 text-xs"></i>
-            <span class="hidden sm:inline">Fundo</span>
+            <span>Fundo</span>
             <i class="fa-solid fa-chevron-down text-[9px] text-zinc-400"></i>
           </button>
           
@@ -513,89 +524,134 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
           </div>
         </div>
 
-        <button onclick="abrirModalLote()" class="inline-flex items-center gap-1.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl shadow-xs transition active:scale-95">
+        <button onclick="abrirModalLote()" class="inline-flex items-center gap-1.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-xl shadow-xs transition active:scale-95 shrink-0">
           <i class="fa-solid fa-bolt text-[11px]"></i>
-          <span>Gerar em Lote</span>
+          <span><span class="hidden sm:inline">Gerar em </span>Lote</span>
         </button>
-        <a href="/api/export-batch/pdf-sheet" target="_blank" class="inline-flex items-center gap-1.5 bg-white hover:bg-zinc-100 text-zinc-700 border border-zinc-200 text-xs font-semibold px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl transition" title="Baixar folha A4 com todos os códigos para impressão">
+
+        <a href="/api/export-batch/pdf-sheet" target="_blank" class="hidden md:inline-flex items-center gap-1.5 bg-white hover:bg-zinc-100 text-zinc-700 border border-zinc-200 text-xs font-semibold px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl transition" title="Baixar folha A4 com todos os códigos para impressão">
           <i class="fa-solid fa-file-pdf text-rose-500 text-[11px]"></i>
-          <span class="hidden md:inline">Folha PDF</span>
+          <span>Folha PDF</span>
         </a>
-        <a href="/api/export-batch/csv" target="_blank" class="inline-flex items-center gap-1.5 bg-white hover:bg-zinc-100 text-zinc-700 border border-zinc-200 text-xs font-semibold px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl transition" title="Exportar planilha CSV com todos os códigos">
+
+        <a href="/api/export-batch/csv" target="_blank" class="hidden md:inline-flex items-center gap-1.5 bg-white hover:bg-zinc-100 text-zinc-700 border border-zinc-200 text-xs font-semibold px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl transition" title="Exportar planilha CSV com todos os códigos">
           <i class="fa-solid fa-file-csv text-emerald-600 text-[11px]"></i>
-          <span class="hidden md:inline">CSV</span>
+          <span>CSV</span>
         </a>
-        <button onclick="abrirModalCriar()" class="inline-flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-semibold px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl shadow-xs transition active:scale-95">
+
+        <button onclick="abrirModalCriar()" class="inline-flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-semibold px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-xl shadow-xs transition active:scale-95 shrink-0">
           <i class="fa-solid fa-plus text-[10px]"></i>
-          <span class="hidden sm:inline">Novo</span> Avulso
+          <span><span class="hidden sm:inline">Novo</span> Avulso</span>
         </button>
-        <button onclick="limparTudo()" class="inline-flex items-center gap-1.5 bg-zinc-100 hover:bg-rose-50 text-zinc-500 hover:text-rose-600 border border-zinc-200 text-xs font-medium px-2 py-1.5 rounded-xl transition" title="Limpar todos os QR Codes">
+
+        <!-- Botão Limpar Tudo (Desktop) -->
+        <button onclick="limparTudo()" class="hidden sm:inline-flex items-center gap-1.5 bg-zinc-100 hover:bg-rose-50 text-zinc-500 hover:text-rose-600 border border-zinc-200 text-xs font-medium px-2 py-1.5 rounded-xl transition shrink-0" title="Limpar todos os QR Codes">
           <i class="fa-solid fa-trash-can text-[11px]"></i>
         </button>
+
+        <!-- Menu "Mais Ações" para Mobile (< sm) -->
+        <div class="relative sm:hidden" id="container-menu-mobile">
+          <button type="button" onclick="toggleMenuMobile(event)" id="btn-menu-mobile" class="w-8 h-8 rounded-xl bg-zinc-100 hover:bg-zinc-200/80 text-zinc-700 border border-zinc-200 flex items-center justify-center transition active:scale-95 shrink-0" title="Mais opções">
+            <i class="fa-solid fa-ellipsis-vertical text-xs"></i>
+          </button>
+          
+          <div id="dropdown-mobile" class="hidden absolute right-0 mt-2 w-52 bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-zinc-200/80 py-1.5 z-50 divide-y divide-zinc-100">
+            <div class="p-1 space-y-0.5">
+              <a href="/api/export-batch/pdf-sheet" target="_blank" class="w-full px-3 py-2 rounded-xl text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-100 flex items-center gap-2.5 transition">
+                <i class="fa-solid fa-file-pdf text-rose-500 text-xs"></i>
+                <span>Baixar Folha A4 (PDF)</span>
+              </a>
+              <a href="/api/export-batch/csv" target="_blank" class="w-full px-3 py-2 rounded-xl text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-100 flex items-center gap-2.5 transition">
+                <i class="fa-solid fa-file-csv text-emerald-600 text-xs"></i>
+                <span>Exportar Planilha CSV</span>
+              </a>
+            </div>
+
+            <!-- Opções de Fundo no Mobile -->
+            <div class="p-2 space-y-1">
+              <span class="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block px-1">Fundo da Tela</span>
+              <div class="grid grid-cols-5 gap-1.5 px-1 py-1">
+                <button type="button" onclick="aplicarFundoDashboard('default'); fecharMenuMobile();" class="w-6 h-6 rounded-full bg-zinc-200 border border-zinc-300" title="Padrão"></button>
+                <button type="button" onclick="aplicarFundoDashboard('aurora'); fecharMenuMobile();" class="w-6 h-6 rounded-full bg-gradient-to-tr from-teal-200 via-indigo-200 to-purple-200 border border-teal-300" title="Aurora"></button>
+                <button type="button" onclick="aplicarFundoDashboard('sunset'); fecharMenuMobile();" class="w-6 h-6 rounded-full bg-gradient-to-tr from-amber-200 via-rose-200 to-indigo-200 border border-amber-300" title="Sunset"></button>
+                <button type="button" onclick="aplicarFundoDashboard('mesh'); fecharMenuMobile();" class="w-6 h-6 rounded-full bg-gradient-to-tr from-indigo-300 via-purple-300 to-pink-300 border border-indigo-300" title="Cyber"></button>
+                <button type="button" onclick="aplicarFundoDashboard('dark'); fecharMenuMobile();" class="w-6 h-6 rounded-full bg-gradient-to-tr from-slate-900 via-indigo-950 to-zinc-900 border border-zinc-500" title="Dark"></button>
+              </div>
+            </div>
+
+            <div class="p-1">
+              <button type="button" onclick="fecharMenuMobile(); limparTudo();" class="w-full px-3 py-2 rounded-xl text-left text-xs font-semibold text-rose-600 hover:bg-rose-50 flex items-center gap-2.5 transition">
+                <i class="fa-solid fa-trash-can text-xs text-rose-500"></i>
+                <span>Limpar Todos os QR Codes</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
       </div>
 
     </div>
   </header>
 
   <!-- Container Principal -->
-  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-5">
+  <main class="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 py-3.5 sm:py-6 space-y-3.5 sm:space-y-5">
 
     <!-- KPI Strip: Métricas Operacionais em Tempo Real -->
-    <section class="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
-      <div class="bg-white p-3 sm:p-3.5 rounded-xl border border-zinc-200/80 shadow-2xs flex items-center justify-between">
+    <section class="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
+      <div class="bg-white p-2.5 sm:p-3.5 rounded-xl border border-zinc-200/80 shadow-2xs flex flex-col justify-between gap-1.5 sm:flex-row sm:items-center">
         <div>
-          <span class="text-[11px] font-medium text-zinc-400 block">Total de Códigos</span>
-          <span id="kpi-total" class="text-xl sm:text-2xl font-bold text-zinc-900 tracking-tight">0</span>
+          <span class="text-[10px] sm:text-[11px] font-medium text-zinc-400 block truncate">Total de Códigos</span>
+          <span id="kpi-total" class="text-lg sm:text-2xl font-bold text-zinc-900 tracking-tight">0</span>
         </div>
-        <span class="text-[10px] text-zinc-600 font-semibold bg-zinc-100 px-2 py-0.5 rounded-md flex items-center gap-1">
-          <i class="fa-solid fa-layer-group text-[9px] text-indigo-600"></i> Cadastrados
+        <span class="text-[9px] sm:text-[10px] text-zinc-600 font-semibold bg-zinc-100 px-1.5 sm:px-2 py-0.5 rounded-md flex items-center gap-1 self-start sm:self-auto shrink-0">
+          <i class="fa-solid fa-layer-group text-[8px] sm:text-[9px] text-indigo-600"></i> Cadastrados
         </span>
       </div>
 
-      <div class="bg-white p-3 sm:p-3.5 rounded-xl border border-zinc-200/80 shadow-2xs flex items-center justify-between">
+      <div class="bg-white p-2.5 sm:p-3.5 rounded-xl border border-zinc-200/80 shadow-2xs flex flex-col justify-between gap-1.5 sm:flex-row sm:items-center">
         <div>
-          <span class="text-[11px] font-medium text-zinc-400 block">Ativos (Online)</span>
-          <span id="kpi-ativos" class="text-xl sm:text-2xl font-bold text-emerald-600 tracking-tight">0</span>
+          <span class="text-[10px] sm:text-[11px] font-medium text-zinc-400 block truncate">Ativos (Online)</span>
+          <span id="kpi-ativos" class="text-lg sm:text-2xl font-bold text-emerald-600 tracking-tight">0</span>
         </div>
-        <span class="text-[10px] text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded-md flex items-center gap-1">
-          <i class="fa-solid fa-circle-check text-[9px]"></i> Redirecionando
+        <span class="text-[9px] sm:text-[10px] text-emerald-700 font-semibold bg-emerald-50 px-1.5 sm:px-2 py-0.5 rounded-md flex items-center gap-1 self-start sm:self-auto shrink-0">
+          <i class="fa-solid fa-circle-check text-[8px] sm:text-[9px]"></i> Redirecionando
         </span>
       </div>
 
-      <div class="bg-white p-3 sm:p-3.5 rounded-xl border border-zinc-200/80 shadow-2xs flex items-center justify-between">
+      <div class="bg-white p-2.5 sm:p-3.5 rounded-xl border border-zinc-200/80 shadow-2xs flex flex-col justify-between gap-1.5 sm:flex-row sm:items-center">
         <div>
-          <span class="text-[11px] font-medium text-zinc-400 block">Aguardando 1º Scan</span>
-          <span id="kpi-unclaimed" class="text-xl sm:text-2xl font-bold text-amber-600 tracking-tight">0</span>
+          <span class="text-[10px] sm:text-[11px] font-medium text-zinc-400 block truncate">Aguardando 1º Scan</span>
+          <span id="kpi-unclaimed" class="text-lg sm:text-2xl font-bold text-amber-600 tracking-tight">0</span>
         </div>
-        <span class="text-[10px] text-amber-700 font-medium bg-amber-50 px-2 py-0.5 rounded-md flex items-center gap-1">
-          <i class="fa-solid fa-hourglass-half text-[9px]"></i> Prontos / Virgens
+        <span class="text-[9px] sm:text-[10px] text-amber-700 font-medium bg-amber-50 px-1.5 sm:px-2 py-0.5 rounded-md flex items-center gap-1 self-start sm:self-auto shrink-0">
+          <i class="fa-solid fa-hourglass-half text-[8px] sm:text-[9px]"></i> Virgens
         </span>
       </div>
 
-      <div class="bg-white p-3 sm:p-3.5 rounded-xl border border-zinc-200/80 shadow-2xs flex items-center justify-between">
+      <div class="bg-white p-2.5 sm:p-3.5 rounded-xl border border-zinc-200/80 shadow-2xs flex flex-col justify-between gap-1.5 sm:flex-row sm:items-center">
         <div>
-          <span class="text-[11px] font-medium text-zinc-400 block">Desativados / Pausados</span>
-          <span id="kpi-desativados" class="text-xl sm:text-2xl font-bold text-rose-600 tracking-tight">0</span>
+          <span class="text-[10px] sm:text-[11px] font-medium text-zinc-400 block truncate">Desativados</span>
+          <span id="kpi-desativados" class="text-lg sm:text-2xl font-bold text-rose-600 tracking-tight">0</span>
         </div>
-        <span class="text-[10px] text-rose-700 font-semibold bg-rose-50 px-2 py-0.5 rounded-md flex items-center gap-1">
-          <i class="fa-solid fa-pause text-[9px]"></i> Bloqueados
+        <span class="text-[9px] sm:text-[10px] text-rose-700 font-semibold bg-rose-50 px-1.5 sm:px-2 py-0.5 rounded-md flex items-center gap-1 self-start sm:self-auto shrink-0">
+          <i class="fa-solid fa-pause text-[8px] sm:text-[9px]"></i> Pausados
         </span>
       </div>
     </section>
 
     <!-- Banner Informativo da Plataforma Dinâmica -->
-    <section class="bg-white rounded-xl border border-indigo-200/70 bg-gradient-to-r from-indigo-50/50 via-white to-purple-50/30 p-3.5 sm:p-4 shadow-2xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
-      <div class="flex items-center gap-3">
-        <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-600 to-purple-600 text-white flex items-center justify-center text-sm shadow-xs shrink-0 font-bold">
+    <section class="bg-white rounded-xl border border-indigo-200/70 bg-gradient-to-r from-indigo-50/50 via-white to-purple-50/30 p-3 sm:p-4 shadow-2xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+      <div class="flex items-start sm:items-center gap-3">
+        <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-600 to-purple-600 text-white flex items-center justify-center text-sm shadow-xs shrink-0 font-bold mt-0.5 sm:mt-0">
           <i class="fa-solid fa-bolt"></i>
         </div>
         <div>
           <h4 class="font-bold text-zinc-900 text-xs sm:text-sm">Plataforma Dinâmica: Criação em Lote & Ativação no 1º Scan</h4>
-          <p class="text-zinc-600 text-[11px] mt-0.5">Gere lotes de QR codes para impressão antecipada. Ao escanear pela primeira vez com a câmera do celular, o cliente final cadastra o link de destino. Pelo painel administrativo, você pode ativar, desativar ou editar qualquer código a qualquer momento.</p>
+          <p class="text-zinc-600 text-[11px] mt-0.5">Gere lotes de QR codes para impressão antecipada. Ao escanear pela primeira vez, o cliente final cadastra o link de destino. Pelo painel, você ativa, desativa ou edita qualquer código a qualquer momento.</p>
         </div>
       </div>
-      <div class="flex items-center gap-2 shrink-0">
-        <button onclick="abrirModalLote()" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[11px] shadow-2xs transition">
+      <div class="flex items-center gap-2 w-full sm:w-auto shrink-0">
+        <button onclick="abrirModalLote()" class="w-full sm:w-auto justify-center inline-flex items-center gap-1.5 px-3 py-2 sm:py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs sm:text-[11px] shadow-2xs transition">
           <i class="fa-solid fa-plus text-[10px]"></i> Criar Novo Lote
         </button>
       </div>
@@ -605,33 +661,38 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     <section class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
       
       <!-- Busca rápida -->
-      <div class="relative flex-1 max-w-sm">
+      <div class="relative flex-1 w-full sm:max-w-sm">
         <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-xs text-zinc-400"></i>
         <input type="text" id="filtro-busca" oninput="filtrarQRs()" placeholder="Buscar por nome, slug ou URL..." class="w-full text-xs bg-white rounded-xl border border-zinc-200/80 pl-8 pr-3 py-2 outline-none focus:border-zinc-400 focus:ring-1 focus:ring-zinc-400 transition">
       </div>
 
-      <!-- Filtros e Alternância Grid/Lista -->
-      <div class="flex items-center justify-between sm:justify-end gap-2 flex-wrap">
-        <div class="flex items-center space-x-1 bg-zinc-100 p-0.5 rounded-lg border border-zinc-200 text-xs">
-          <button type="button" onclick="setFiltroStatus('all')" id="tab-filtro-all" class="px-2.5 py-1 rounded-md text-xs font-bold bg-white text-zinc-900 shadow-2xs">
+      <!-- Filtros com rolagem suave no mobile e Alternância Grid/Lista -->
+      <div class="w-full sm:w-auto flex items-center justify-between gap-2">
+        <div class="flex items-center space-x-1 bg-zinc-100 p-0.5 rounded-xl border border-zinc-200 text-xs overflow-x-auto no-scrollbar flex-1 sm:flex-initial">
+          <button type="button" onclick="setFiltroStatus('all')" id="tab-filtro-all" class="whitespace-nowrap px-2.5 py-1.5 sm:py-1 rounded-lg text-xs font-bold bg-white text-zinc-900 shadow-2xs shrink-0 transition">
             Todos (<span id="count-all">0</span>)
           </button>
-          <button type="button" onclick="setFiltroStatus('active')" id="tab-filtro-active" class="px-2.5 py-1 rounded-md text-xs font-medium text-zinc-500 hover:text-zinc-900 transition">
+          <button type="button" onclick="setFiltroStatus('active')" id="tab-filtro-active" class="whitespace-nowrap px-2.5 py-1.5 sm:py-1 rounded-lg text-xs font-medium text-zinc-500 hover:text-zinc-900 shrink-0 transition">
             Ativos (<span id="count-active">0</span>)
           </button>
-          <button type="button" onclick="setFiltroStatus('unclaimed')" id="tab-filtro-unclaimed" class="px-2.5 py-1 rounded-md text-xs font-medium text-zinc-500 hover:text-zinc-900 transition">
-            Aguardando 1º Scan (<span id="count-unclaimed">0</span>)
+          <button type="button" onclick="setFiltroStatus('unclaimed')" id="tab-filtro-unclaimed" class="whitespace-nowrap px-2.5 py-1.5 sm:py-1 rounded-lg text-xs font-medium text-zinc-500 hover:text-zinc-900 shrink-0 transition">
+            1º Scan (<span id="count-unclaimed">0</span>)
           </button>
-          <button type="button" onclick="setFiltroStatus('paused')" id="tab-filtro-paused" class="px-2.5 py-1 rounded-md text-xs font-medium text-zinc-500 hover:text-zinc-900 transition">
-            Desativados (<span id="count-paused">0</span>)
+          <button type="button" onclick="setFiltroStatus('paused')" id="tab-filtro-paused" class="whitespace-nowrap px-2.5 py-1.5 sm:py-1 rounded-lg text-xs font-medium text-zinc-500 hover:text-zinc-900 shrink-0 transition">
+            Pausados (<span id="count-paused">0</span>)
           </button>
         </div>
 
-        <div class="flex items-center space-x-1 bg-zinc-100 p-0.5 rounded-lg border border-zinc-200 text-xs">
-          <button onclick="alternarModoVisualizacao('grid')" id="btn-view-grid" class="p-1 px-2 rounded-md bg-white text-zinc-900 shadow-2xs" title="Visualização em Cards">
+        <div class="flex items-center space-x-1 bg-zinc-100 p-0.5 rounded-xl border border-zinc-200 text-xs shrink-0">
+          <button onclick="alternarModoVisualizacao('grid')" id="btn-view-grid" class="p-1.5 px-2 rounded-lg bg-white text-zinc-900 shadow-2xs transition" title="Cards">
             <i class="fa-solid fa-table-cells-large text-xs"></i>
           </button>
-          <button onclick="alternarModoVisualizacao('list')" id="btn-view-list" class="p-1 px-2 rounded-md text-zinc-500 hover:text-zinc-900" title="Visualização em Lista">
+          <button onclick="alternarModoVisualizacao('list')" id="btn-view-list" class="p-1.5 px-2 rounded-lg text-zinc-500 hover:text-zinc-900 transition" title="Lista">
+            <i class="fa-solid fa-bars text-xs"></i>
+          </button>
+        </div>
+      </div>
+    </section>
             <i class="fa-solid fa-bars text-xs"></i>
           </button>
         </div>
@@ -647,18 +708,18 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   </main>
 
   <!-- Modal Lote: Gerar Códigos em Escala (Prontos para 1º Scan) -->
-  <div id="modal-lote" class="fixed inset-0 bg-zinc-900/60 backdrop-blur-xs z-50 flex items-center justify-center hidden p-3 sm:p-4 transition-all">
-    <div class="bg-white rounded-2xl max-w-lg w-full flex flex-col shadow-2xl border border-zinc-200 overflow-hidden transform transition-all">
-      <div class="px-5 py-3.5 border-b border-zinc-100 flex items-center justify-between bg-zinc-50/70 shrink-0">
+  <div id="modal-lote" class="fixed inset-0 bg-zinc-900/60 backdrop-blur-xs z-50 flex items-end sm:items-center justify-center hidden p-0 sm:p-4 transition-all">
+    <div class="bg-white rounded-t-3xl sm:rounded-2xl max-w-lg w-full max-h-[92vh] flex flex-col shadow-2xl border border-zinc-200 overflow-hidden transform transition-all">
+      <div class="px-4 py-3 sm:px-5 sm:py-3.5 border-b border-zinc-100 flex items-center justify-between bg-zinc-50/70 shrink-0">
         <div class="flex items-center gap-2">
           <span class="w-7 h-7 rounded-lg bg-indigo-500/10 text-indigo-600 flex items-center justify-center text-sm font-bold">⚡</span>
           <h3 class="font-bold text-sm text-zinc-900">Gerar QR Codes em Lote (Em Escala)</h3>
         </div>
-        <button onclick="fecharModalLote()" class="w-7 h-7 rounded-lg hover:bg-zinc-200/60 text-zinc-400 hover:text-zinc-700 flex items-center justify-center transition">
+        <button onclick="fecharModalLote()" class="w-8 h-8 rounded-lg hover:bg-zinc-200/60 text-zinc-400 hover:text-zinc-700 flex items-center justify-center transition">
           <i class="fa-solid fa-xmark text-sm"></i>
         </button>
       </div>
-      <form id="form-lote" onsubmit="gerarLote(event)" class="p-5 space-y-4 text-xs">
+      <form id="form-lote" onsubmit="gerarLote(event)" class="p-4 sm:p-5 space-y-3.5 sm:space-y-4 text-xs overflow-y-auto flex-1">
         <div>
           <label class="block font-semibold text-zinc-700 mb-1">Quantidade de Códigos a Gerar</label>
           <div class="flex items-center gap-3">
@@ -667,7 +728,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
           </div>
           <p class="text-[10px] text-zinc-400 mt-1">Todos serão gerados em estado virgem, prontos para impressão e ativação no 1º scan.</p>
         </div>
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label class="block font-semibold text-zinc-700 mb-1">Prefixo do Link</label>
             <input type="text" id="lote-prefixo" value="mesa-" placeholder="Ex: mesa-, tag-, qr-" class="w-full px-3 py-2 border border-zinc-200 rounded-lg text-xs font-mono">
@@ -681,7 +742,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
           <label class="block font-semibold text-zinc-700 mb-1">Moldura do Código</label>
           <input type="text" id="lote-frame" value="ESCANEIE AQUI" class="w-full px-3 py-2 border border-zinc-200 rounded-lg text-xs uppercase font-bold">
         </div>
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label class="block font-semibold text-zinc-700 mb-1">Cor dos Módulos</label>
             <input type="color" id="lote-cor" value="#0F172A" class="w-full h-9 p-1 border border-zinc-200 rounded-lg cursor-pointer">
@@ -695,9 +756,9 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
             </select>
           </div>
         </div>
-        <div class="pt-3 border-t border-zinc-100 flex items-center justify-end gap-2">
-          <button type="button" onclick="fecharModalLote()" class="px-4 py-2 border border-zinc-200 rounded-xl text-zinc-600 hover:bg-zinc-50 font-medium">Cancelar</button>
-          <button type="submit" id="btn-submit-lote" class="px-5 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-xl font-bold flex items-center gap-1.5 shadow-sm active:scale-95 transition">
+        <div class="pt-3 border-t border-zinc-100 flex items-center justify-end gap-2 shrink-0">
+          <button type="button" onclick="fecharModalLote()" class="flex-1 sm:flex-initial px-4 py-2.5 sm:py-2 border border-zinc-200 rounded-xl text-zinc-600 hover:bg-zinc-50 font-medium text-center">Cancelar</button>
+          <button type="submit" id="btn-submit-lote" class="flex-1 sm:flex-initial px-5 py-2.5 sm:py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-xl font-bold flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition text-center">
             <i class="fa-solid fa-bolt text-[11px]"></i>
             <span>Gerar Lote de Códigos</span>
           </button>
@@ -707,19 +768,19 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   </div>
 
   <!-- Modal CRUD: Criar / Editar QR Code (Responsivo, max-h-88vh, sem cortes) -->
-  <div id="modal-qr" class="fixed inset-0 bg-zinc-900/50 backdrop-blur-xs z-50 flex items-center justify-center hidden p-3 sm:p-4 transition-all">
-    <div class="bg-white rounded-2xl max-w-2xl w-full max-h-[88vh] flex flex-col shadow-2xl border border-zinc-200 overflow-hidden transform transition-all">
+  <div id="modal-qr" class="fixed inset-0 bg-zinc-900/50 backdrop-blur-xs z-50 flex items-end sm:items-center justify-center hidden p-0 sm:p-4 transition-all">
+    <div class="bg-white rounded-t-3xl sm:rounded-2xl max-w-2xl w-full max-h-[92vh] sm:max-h-[88vh] flex flex-col shadow-2xl border border-zinc-200 overflow-hidden transform transition-all">
       
       <!-- Modal Header (Fixo) -->
-      <div class="px-5 py-3 border-b border-zinc-100 flex items-center justify-between bg-zinc-50/70 shrink-0">
-        <h3 id="modal-titulo" class="font-bold text-zinc-900 text-sm">Novo QR Code Estático</h3>
-        <button onclick="fecharModal()" class="w-7 h-7 rounded-lg hover:bg-zinc-200/60 text-zinc-400 hover:text-zinc-700 flex items-center justify-center transition">
+      <div class="px-4 py-3 sm:px-5 border-b border-zinc-100 flex items-center justify-between bg-zinc-50/70 shrink-0">
+        <h3 id="modal-titulo" class="font-bold text-zinc-900 text-sm">Novo QR Code Dinâmico</h3>
+        <button onclick="fecharModal()" class="w-8 h-8 rounded-lg hover:bg-zinc-200/60 text-zinc-400 hover:text-zinc-700 flex items-center justify-center transition">
           <i class="fa-solid fa-xmark text-sm"></i>
         </button>
       </div>
 
       <!-- Modal Body (Rolagem suave caso a tela seja pequena) -->
-      <div class="overflow-y-auto p-5 flex-1">
+      <div class="overflow-y-auto p-4 sm:p-5 flex-1">
         <form id="form-qr" onsubmit="salvarQRCode(event)">
           <input type="hidden" id="qr-modo" value="criar">
           <input type="hidden" id="qr-slug-original" value="">
@@ -757,8 +818,8 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
                 <div>
                   <label class="block text-[11px] font-semibold text-zinc-700 mb-0.5">Cor dos Módulos</label>
                   <div class="flex items-center space-x-1.5">
-                    <input type="color" id="input-cor" value="#0F172A" class="w-8 h-7 rounded border border-zinc-200 p-0.5 cursor-pointer" onchange="atualizarPreviewLive()">
-                    <div class="flex items-center space-x-1">
+                    <input type="color" id="input-cor" value="#0F172A" class="w-8 h-7 rounded border border-zinc-200 p-0.5 cursor-pointer shrink-0" onchange="atualizarPreviewLive()">
+                    <div class="flex items-center space-x-1 flex-wrap">
                       <button type="button" onclick="setCor('#0F172A')" class="w-4 h-4 rounded-full bg-[#0F172A] border border-zinc-300" title="Preto"></button>
                       <button type="button" onclick="setCor('#1E3A8A')" class="w-4 h-4 rounded-full bg-[#1E3A8A] border border-zinc-300" title="Azul"></button>
                       <button type="button" onclick="setCor('#991B1B')" class="w-4 h-4 rounded-full bg-[#991B1B] border border-zinc-300" title="Vinho"></button>
@@ -792,7 +853,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
                 <!-- Fundo Sólido -->
                 <div id="secao-fundo-solido" class="flex items-center space-x-2">
                   <input type="color" id="input-bg-cor" value="#FFFFFF" class="w-8 h-7 rounded border border-zinc-200 p-0.5 cursor-pointer shrink-0" onchange="atualizarPreviewLive()">
-                  <div class="flex items-center space-x-1">
+                  <div class="flex items-center space-x-1 flex-wrap">
                     <button type="button" onclick="setBgCor('#FFFFFF')" class="w-4 h-4 rounded-full bg-[#FFFFFF] border border-zinc-300 shadow-2xs" title="Branco"></button>
                     <button type="button" onclick="setBgCor('#F8FAFC')" class="w-4 h-4 rounded-full bg-[#F8FAFC] border border-zinc-300" title="Gelo"></button>
                     <button type="button" onclick="setBgCor('#FEF9C3')" class="w-4 h-4 rounded-full bg-[#FEF9C3] border border-zinc-300" title="Creme"></button>
@@ -863,16 +924,16 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       </div>
 
       <!-- Modal Footer (Fixo na parte inferior) -->
-      <div class="px-5 py-3 border-t border-zinc-100 flex items-center justify-between bg-zinc-50/70 shrink-0">
-        <div>
-          <button type="button" id="btn-modal-excluir" onclick="deletarQRCodeAtualDoModal()" class="hidden px-3 py-1.5 text-xs font-semibold text-rose-600 hover:text-white hover:bg-rose-600 rounded-lg border border-rose-200 hover:border-rose-600 transition flex items-center gap-1.5 shadow-2xs">
+      <div class="px-4 py-3 sm:px-5 sm:py-3 border-t border-zinc-100 flex flex-wrap sm:flex-nowrap items-center justify-between gap-2 bg-zinc-50/70 shrink-0">
+        <div class="w-full sm:w-auto flex items-center justify-between sm:justify-start">
+          <button type="button" id="btn-modal-excluir" onclick="deletarQRCodeAtualDoModal()" class="hidden px-3 py-2 sm:py-1.5 text-xs font-semibold text-rose-600 hover:text-white hover:bg-rose-600 rounded-lg border border-rose-200 hover:border-rose-600 transition flex items-center gap-1.5 shadow-2xs">
             <i class="fa-solid fa-trash-can"></i> Excluir QR Code
           </button>
           <span id="modal-footer-hint" class="text-[10px] text-emerald-600 font-medium hidden sm:inline"><i class="fa-solid fa-check mr-1"></i>Vetor pronto para impressão gráfica</span>
         </div>
-        <div class="flex items-center space-x-2 ml-auto">
-          <button type="button" onclick="fecharModal()" class="px-3 py-1.5 text-xs font-semibold text-zinc-600 hover:bg-zinc-200/60 rounded-lg transition">Cancelar</button>
-          <button type="button" onclick="document.getElementById('form-qr').requestSubmit()" id="btn-submit" class="px-4 py-1.5 text-xs font-semibold text-white bg-zinc-900 hover:bg-zinc-800 rounded-lg shadow-xs transition active:scale-95">Salvar QR Code Estático</button>
+        <div class="flex items-center space-x-2 ml-auto w-full sm:w-auto justify-end">
+          <button type="button" onclick="fecharModal()" class="flex-1 sm:flex-initial px-3.5 py-2 sm:py-1.5 text-xs font-semibold text-zinc-600 hover:bg-zinc-200/60 rounded-lg transition text-center">Cancelar</button>
+          <button type="button" onclick="document.getElementById('form-qr').requestSubmit()" id="btn-submit" class="flex-1 sm:flex-initial px-4 py-2 sm:py-1.5 text-xs font-semibold text-white bg-zinc-900 hover:bg-zinc-800 rounded-lg shadow-xs transition active:scale-95 text-center">Salvar</button>
         </div>
       </div>
 
@@ -881,22 +942,22 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 
   <!-- Modal Zoom: Visualizar QR Code Ampliado para Escaneamento Rápido -->
   <div id="modal-zoom" class="fixed inset-0 bg-zinc-900/60 backdrop-blur-xs z-50 flex items-center justify-center hidden p-4 transition-all">
-    <div class="bg-white rounded-2xl max-w-sm w-full p-6 text-center shadow-2xl border border-zinc-200 relative">
-      <button onclick="fecharModalZoom()" class="absolute right-4 top-4 text-zinc-400 hover:text-zinc-600 w-7 h-7 rounded-lg flex items-center justify-center">
+    <div class="bg-white rounded-2xl max-w-xs sm:max-w-sm w-full p-5 sm:p-6 text-center shadow-2xl border border-zinc-200 relative">
+      <button onclick="fecharModalZoom()" class="absolute right-3.5 top-3.5 text-zinc-400 hover:text-zinc-600 w-8 h-8 rounded-lg flex items-center justify-center transition">
         <i class="fa-solid fa-xmark"></i>
       </button>
       <h3 id="zoom-title" class="font-bold text-sm text-zinc-900 truncate">QR Code Ampliado</h3>
       <p id="zoom-slug" class="text-xs text-zinc-500 font-mono mt-0.5 truncate">/slug</p>
       
       <div class="my-4 p-3 bg-zinc-50 rounded-xl border border-zinc-100 flex items-center justify-center">
-        <img id="zoom-img" src="" alt="QR Code Ampliado" class="w-56 h-56 object-contain">
+        <img id="zoom-img" src="" alt="QR Code Ampliado" class="w-48 h-48 sm:w-56 sm:h-56 object-contain">
       </div>
 
       <p class="text-[11px] text-zinc-400">Aponte a câmera do seu smartphone para abrir o destino direto.</p>
       
       <div class="mt-4 pt-3 border-t border-zinc-100 flex items-center justify-center gap-2">
-        <a id="zoom-btn-svg" href="#" class="px-3 py-1.5 text-xs font-semibold text-zinc-700 bg-zinc-100 hover:bg-zinc-200 rounded-lg transition">Baixar SVG</a>
-        <a id="zoom-btn-png" href="#" class="px-3 py-1.5 text-xs font-semibold text-zinc-700 bg-zinc-100 hover:bg-zinc-200 rounded-lg transition">Baixar PNG</a>
+        <a id="zoom-btn-svg" href="#" class="flex-1 sm:flex-initial px-3.5 py-2 sm:py-1.5 text-xs font-semibold text-zinc-700 bg-zinc-100 hover:bg-zinc-200 rounded-lg transition text-center">Baixar SVG</a>
+        <a id="zoom-btn-png" href="#" class="flex-1 sm:flex-initial px-3.5 py-2 sm:py-1.5 text-xs font-semibold text-zinc-700 bg-zinc-100 hover:bg-zinc-200 rounded-lg transition text-center">Baixar PNG</a>
       </div>
     </div>
   </div>
@@ -1025,6 +1086,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 
     function toggleMenuFundo(event) {
       if (event) event.stopPropagation();
+      fecharMenuMobile();
       const menu = document.getElementById('dropdown-fundo');
       if (menu) menu.classList.toggle('hidden');
     }
@@ -1033,6 +1095,30 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       const menu = document.getElementById('dropdown-fundo');
       if (menu) menu.classList.add('hidden');
     }
+
+    function toggleMenuMobile(event) {
+      if (event) event.stopPropagation();
+      fecharMenuFundo();
+      const menu = document.getElementById('dropdown-mobile');
+      if (menu) menu.classList.toggle('hidden');
+    }
+
+    function fecharMenuMobile() {
+      const menu = document.getElementById('dropdown-mobile');
+      if (menu) menu.classList.add('hidden');
+    }
+
+    // Fechar menus flutuantes ao tocar fora deles
+    document.addEventListener('click', function(e) {
+      const cFundo = document.getElementById('container-seletor-fundo');
+      if (cFundo && !cFundo.contains(e.target)) {
+        fecharMenuFundo();
+      }
+      const cMobile = document.getElementById('container-menu-mobile');
+      if (cMobile && !cMobile.contains(e.target)) {
+        fecharMenuMobile();
+      }
+    });
 
     function aplicarFundoDashboard(theme) {
       localStorage.setItem('dashboard_bg_theme', theme);
@@ -1418,20 +1504,20 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
             </div>
 
             <!-- Rodapé: Ações e Downloads -->
-            <div class="mt-2.5 pt-2 border-t border-zinc-100 flex items-center justify-between text-xs">
+            <div class="mt-2.5 pt-2 border-t border-zinc-100 flex flex-wrap sm:flex-nowrap items-center justify-between gap-1.5 sm:gap-2 text-xs">
               <div class="flex items-center space-x-1">
                 ${statusActionBtn}
-                <button onclick="abrirModalEditar('${jsSlug}')" class="px-2 py-1 rounded-md text-zinc-700 hover:bg-zinc-100 font-medium text-[11px] flex items-center gap-1 transition" title="Editar link e cores">
+                <button onclick="abrirModalEditar('${jsSlug}')" class="px-2.5 py-1.5 sm:py-1 rounded-md text-zinc-700 bg-zinc-100 hover:bg-zinc-200 font-medium text-[11px] flex items-center gap-1 transition" title="Editar link e cores">
                   <i class="fa-solid fa-pen text-[9px] text-indigo-600"></i>Editar
                 </button>
                 ${resetBtn}
               </div>
 
-              <div class="flex items-center space-x-1">
-                <a href="/export/${encodeURIComponent(qr.slug)}?format=svg&host_override=${encodeURIComponent(activeHost)}" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-zinc-100 text-zinc-700 hover:bg-zinc-200 transition" title="Baixar Vetor SVG (Gráfica)">SVG</a>
-                <a href="/export/${encodeURIComponent(qr.slug)}?format=png&size=2048&host_override=${encodeURIComponent(activeHost)}" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-zinc-100 text-zinc-700 hover:bg-zinc-200 transition" title="Baixar PNG em Alta Resolução">PNG</a>
-                <a href="/export/${encodeURIComponent(qr.slug)}?format=pdf&host_override=${encodeURIComponent(activeHost)}" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-zinc-100 text-zinc-700 hover:bg-zinc-200 transition" title="Baixar PDF Vetorial">PDF</a>
-                <button onclick="deletarQRCode('${jsSlug}', '${jsName}')" class="p-1 rounded text-rose-500 hover:text-white hover:bg-rose-600 border border-transparent hover:border-rose-600 transition" title="Excluir QR Code">
+              <div class="flex items-center space-x-1 ml-auto sm:ml-0">
+                <a href="/export/${encodeURIComponent(qr.slug)}?format=svg&host_override=${encodeURIComponent(activeHost)}" class="px-2 py-1 rounded-md text-[10px] font-bold bg-zinc-100 text-zinc-700 hover:bg-zinc-200 transition" title="Baixar Vetor SVG (Gráfica)">SVG</a>
+                <a href="/export/${encodeURIComponent(qr.slug)}?format=png&size=2048&host_override=${encodeURIComponent(activeHost)}" class="px-2 py-1 rounded-md text-[10px] font-bold bg-zinc-100 text-zinc-700 hover:bg-zinc-200 transition" title="Baixar PNG em Alta Resolução">PNG</a>
+                <a href="/export/${encodeURIComponent(qr.slug)}?format=pdf&host_override=${encodeURIComponent(activeHost)}" class="px-2 py-1 rounded-md text-[10px] font-bold bg-zinc-100 text-zinc-700 hover:bg-zinc-200 transition" title="Baixar PDF Vetorial">PDF</a>
+                <button onclick="deletarQRCode('${jsSlug}', '${jsName}')" class="p-1 px-1.5 rounded-md text-rose-500 hover:text-white hover:bg-rose-600 border border-transparent hover:border-rose-600 transition" title="Excluir QR Code">
                   <i class="fa-solid fa-trash-can text-xs"></i>
                 </button>
               </div>
@@ -1490,33 +1576,37 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         const resetBtn = !isUnclaimed ? `<button onclick="resetarPrimeiroScan('${jsSlug}')" class="px-1.5 py-1 rounded bg-zinc-100 hover:bg-zinc-200 text-zinc-500 text-[11px]" title="Resetar para novo 1º scan"><i class="fa-solid fa-rotate-left"></i></button>` : '';
 
         return `
-          <div class="p-3 sm:px-4 flex items-center justify-between gap-3 hover:bg-zinc-50/70 transition">
+          <div class="p-3 sm:px-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 hover:bg-zinc-50/70 transition">
             <div class="flex items-center space-x-3 min-w-0">
-              <div class="w-10 h-10 shrink-0 bg-white p-0.5 rounded border border-zinc-200 flex items-center justify-center cursor-pointer" onclick="abrirModalZoom('${jsSlug}', '${jsName}', '${jsQrImgUrl}')">
+              <div class="w-12 h-12 sm:w-10 sm:h-10 shrink-0 bg-white p-0.5 rounded-lg border border-zinc-200 flex items-center justify-center cursor-pointer hover:border-zinc-400 transition" onclick="abrirModalZoom('${jsSlug}', '${jsName}', '${jsQrImgUrl}')" title="Clique para ampliar">
                 <img src="${qrImgUrl}" alt="QR ${safeSlug}" class="w-full h-full object-contain" onerror="this.onerror=null; this.src='${jsLiveFallbackUrl}';">
               </div>
-              <div class="min-w-0">
-                <div class="flex items-center gap-2">
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-1.5 flex-wrap">
                   <h4 class="font-bold text-xs text-zinc-900 truncate" title="${safeName}">${safeName}</h4>
                   ${statusBadge}
                 </div>
-                <div class="flex items-center gap-2 text-[11px] text-zinc-500 mt-0.5">
-                  <span class="font-mono text-zinc-800 font-semibold">/${safeSlug}</span>
+                <div class="flex items-center gap-1.5 text-[11px] text-zinc-500 mt-0.5 truncate">
+                  <span class="font-mono text-zinc-800 font-semibold shrink-0">/${safeSlug}</span>
                   <span>•</span>
-                  ${isUnclaimed ? '<span class="text-amber-600 italic">Código virgem • Aguardando ativação</span>' : `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:text-blue-800 truncate max-w-xs">${safeUrl}</a>`}
+                  <span class="truncate">${isUnclaimed ? '<span class="text-amber-600 italic">Código virgem</span>' : `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:text-blue-800 truncate">${safeUrl}</a>`}</span>
                 </div>
               </div>
             </div>
 
-            <div class="flex items-center space-x-1.5 shrink-0 text-xs">
-              ${statusActionBtn}
-              <button onclick="copiarLink('${window.location.protocol}//${activeHost}/${safeSlug}')" class="px-2 py-1 rounded bg-zinc-100 hover:bg-zinc-200 text-zinc-700 text-[11px] font-medium" title="Copiar link curto">Copiar</button>
-              <button onclick="abrirModalEditar('${jsSlug}')" class="px-2 py-1 rounded bg-zinc-100 hover:bg-zinc-200 text-zinc-700 text-[11px] font-medium">Editar</button>
-              ${resetBtn}
-              <a href="/export/${encodeURIComponent(qr.slug)}?format=svg&host_override=${encodeURIComponent(activeHost)}" class="text-[10px] font-bold bg-zinc-100 hover:bg-zinc-200 rounded text-zinc-700 p-1 px-1.5">SVG</a>
-              <a href="/export/${encodeURIComponent(qr.slug)}?format=png&size=2048&host_override=${encodeURIComponent(activeHost)}" class="text-[10px] font-bold bg-zinc-100 hover:bg-zinc-200 rounded text-zinc-700 p-1 px-1.5">PNG</a>
-              <a href="/export/${encodeURIComponent(qr.slug)}?format=pdf&host_override=${encodeURIComponent(activeHost)}" class="text-[10px] font-bold bg-zinc-100 hover:bg-zinc-200 rounded text-zinc-700 p-1 px-1.5">PDF</a>
-              <button onclick="deletarQRCode('${jsSlug}', '${jsName}')" class="p-1 text-rose-500 hover:text-white hover:bg-rose-600 border border-transparent hover:border-rose-600 rounded transition" title="Excluir QR Code"><i class="fa-solid fa-trash-can"></i></button>
+            <div class="flex items-center justify-between sm:justify-end gap-1.5 text-xs pt-2 sm:pt-0 border-t sm:border-t-0 border-zinc-100 flex-wrap">
+              <div class="flex items-center gap-1">
+                ${statusActionBtn}
+                <button onclick="copiarLink('${window.location.protocol}//${activeHost}/${safeSlug}')" class="px-2 py-1 rounded-lg bg-zinc-100 hover:bg-zinc-200 text-zinc-700 text-[11px] font-medium" title="Copiar link curto">Copiar</button>
+                <button onclick="abrirModalEditar('${jsSlug}')" class="px-2 py-1 rounded-lg bg-zinc-100 hover:bg-zinc-200 text-zinc-700 text-[11px] font-medium">Editar</button>
+                ${resetBtn}
+              </div>
+              <div class="flex items-center gap-1">
+                <a href="/export/${encodeURIComponent(qr.slug)}?format=svg&host_override=${encodeURIComponent(activeHost)}" class="text-[10px] font-bold bg-zinc-100 hover:bg-zinc-200 rounded-lg text-zinc-700 px-2 py-1">SVG</a>
+                <a href="/export/${encodeURIComponent(qr.slug)}?format=png&size=2048&host_override=${encodeURIComponent(activeHost)}" class="text-[10px] font-bold bg-zinc-100 hover:bg-zinc-200 rounded-lg text-zinc-700 px-2 py-1">PNG</a>
+                <a href="/export/${encodeURIComponent(qr.slug)}?format=pdf&host_override=${encodeURIComponent(activeHost)}" class="text-[10px] font-bold bg-zinc-100 hover:bg-zinc-200 rounded-lg text-zinc-700 px-2 py-1">PDF</a>
+                <button onclick="deletarQRCode('${jsSlug}', '${jsName}')" class="p-1 px-1.5 text-rose-500 hover:text-white hover:bg-rose-600 rounded-lg transition" title="Excluir QR Code"><i class="fa-solid fa-trash-can"></i></button>
+              </div>
             </div>
           </div>
         `;
@@ -1526,6 +1616,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     let lastRenderedScansJson = '';
     function renderizarTabelaScans(events) {
       const tbody = document.getElementById('scans-tbody');
+      if (!tbody) return;
       const currentJson = JSON.stringify(events || []);
       if (currentJson === lastRenderedScansJson) {
         return; // Dados inalterados, evita repintar e piscar a tabela
@@ -1865,13 +1956,18 @@ ACTIVATION_HTML = """<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Ativar QR Code /{slug}</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <style>body {{ font-family: 'Plus Jakarta Sans', sans-serif; }}</style>
+  <style>
+    body {{ font-family: 'Plus Jakarta Sans', sans-serif; }}
+    @media (max-width: 640px) {{
+      input {{ font-size: 16px !important; }}
+    }}
+  </style>
 </head>
 <body class="bg-gradient-to-br from-zinc-950 via-zinc-900 to-black text-white min-h-screen flex items-center justify-center p-4">
   <div class="max-w-md w-full bg-zinc-900/90 border border-zinc-800 backdrop-blur-2xl p-6 sm:p-8 rounded-3xl shadow-2xl relative overflow-hidden">
@@ -1996,7 +2092,7 @@ PAUSED_HTML = """<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>QR Code Indisponível</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
