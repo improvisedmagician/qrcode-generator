@@ -445,6 +445,71 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         font-size: 16px !important;
       }
     }
+
+    /* Garantia estrita de dimensionamento correto dos QR Codes no celular e desktop */
+    .qr-thumb-box {
+      width: 64px !important;
+      height: 64px !important;
+      min-width: 64px !important;
+      min-height: 64px !important;
+      max-width: 64px !important;
+      max-height: 64px !important;
+    }
+    @media (min-width: 640px) {
+      .qr-thumb-box {
+        width: 80px !important;
+        height: 80px !important;
+        min-width: 80px !important;
+        min-height: 80px !important;
+        max-width: 80px !important;
+        max-height: 80px !important;
+      }
+    }
+    .qr-thumb-box img, .qr-thumb-img, .qr-list-thumb img {
+      width: 100% !important;
+      height: 100% !important;
+      max-width: 100% !important;
+      max-height: 100% !important;
+      object-fit: contain !important;
+    }
+
+    .qr-list-thumb {
+      width: 48px !important;
+      height: 48px !important;
+      min-width: 48px !important;
+      min-height: 48px !important;
+      max-width: 48px !important;
+      max-height: 48px !important;
+    }
+    @media (min-width: 640px) {
+      .qr-list-thumb {
+        width: 40px !important;
+        height: 40px !important;
+        min-width: 40px !important;
+        min-height: 40px !important;
+        max-width: 40px !important;
+        max-height: 40px !important;
+      }
+    }
+
+    #preview-svg-box svg {
+      width: 100% !important;
+      height: 100% !important;
+      max-width: 100% !important;
+      max-height: 100% !important;
+    }
+
+    #zoom-img {
+      max-width: 220px !important;
+      max-height: 220px !important;
+      object-fit: contain !important;
+    }
+    @media (min-width: 640px) {
+      #zoom-img {
+        max-width: 240px !important;
+        max-height: 240px !important;
+      }
+    }
   </style>
 </head>
 <body class="min-h-full font-sans text-zinc-900 antialiased flex flex-col overflow-x-hidden">
@@ -1563,8 +1628,8 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 
               <!-- Meio: QR Code Thumbnail + Links -->
               <div class="flex items-center gap-3 bg-zinc-50/70 p-2.5 rounded-lg border border-zinc-100">
-                <div class="w-18 h-18 sm:w-20 sm:h-20 shrink-0 bg-white p-1 rounded-lg border border-zinc-200/80 flex items-center justify-center cursor-pointer hover:border-zinc-400 transition" onclick="abrirModalZoom('${jsSlug}', '${jsName}', '${jsQrImgUrl}')" title="Clique para ampliar o QR Code">
-                  <img src="${qrImgUrl}" alt="QR ${safeSlug}" class="w-full h-full object-contain" onerror="this.onerror=null; this.src='${jsLiveFallbackUrl}';">
+                <div class="qr-thumb-box w-16 h-16 sm:w-20 sm:h-20 shrink-0 bg-white p-1 rounded-lg border border-zinc-200/80 flex items-center justify-center cursor-pointer hover:border-zinc-400 transition aspect-square overflow-hidden" onclick="abrirModalZoom('${jsSlug}', '${jsName}', '${jsQrImgUrl}')" title="Clique para ampliar o QR Code">
+                  <img src="${qrImgUrl}" alt="QR ${safeSlug}" class="qr-thumb-img w-full h-full max-w-full max-h-full object-contain block pointer-events-none" onerror="this.onerror=null; this.src='${jsLiveFallbackUrl}';">
                 </div>
                 <div class="min-w-0 flex-1 space-y-1.5">
                   <div>
@@ -1657,8 +1722,8 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         return `
           <div class="p-3 sm:px-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 hover:bg-zinc-50/70 transition">
             <div class="flex items-center space-x-3 min-w-0">
-              <div class="w-12 h-12 sm:w-10 sm:h-10 shrink-0 bg-white p-0.5 rounded-lg border border-zinc-200 flex items-center justify-center cursor-pointer hover:border-zinc-400 transition" onclick="abrirModalZoom('${jsSlug}', '${jsName}', '${jsQrImgUrl}')" title="Clique para ampliar">
-                <img src="${qrImgUrl}" alt="QR ${safeSlug}" class="w-full h-full object-contain" onerror="this.onerror=null; this.src='${jsLiveFallbackUrl}';">
+              <div class="qr-list-thumb w-12 h-12 sm:w-10 sm:h-10 shrink-0 bg-white p-0.5 rounded-lg border border-zinc-200 flex items-center justify-center cursor-pointer hover:border-zinc-400 transition aspect-square overflow-hidden" onclick="abrirModalZoom('${jsSlug}', '${jsName}', '${jsQrImgUrl}')" title="Clique para ampliar">
+                <img src="${qrImgUrl}" alt="QR ${safeSlug}" class="w-full h-full max-w-full max-h-full object-contain block pointer-events-none" onerror="this.onerror=null; this.src='${jsLiveFallbackUrl}';">
               </div>
               <div class="min-w-0 flex-1">
                 <div class="flex items-center gap-1.5 flex-wrap">
