@@ -1357,7 +1357,11 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       } catch {}
     }
 
+    let isFetchingDashboard = false;
+
     async function carregarDashboard() {
+      if (isFetchingDashboard) return;
+      isFetchingDashboard = true;
       try {
         const activeHost = getActiveHost();
         const ts = Date.now();
@@ -1376,14 +1380,16 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
           mergedClicks[k] = Math.max(mergedClicks[k] || 0, Number(v) || 0);
         }
         saveStoredClicks(mergedClicks);
-        todosQRs = (Array.isArray(serverQRs) ? serverQRs : [])
-          .filter(q => !deletedSlugsCache.has(String(q.slug).toLowerCase().trim()))
-          .map(q => {
-            const k = String(q.slug).toLowerCase().trim();
-            const clicks = Math.max(mergedClicks[k] || 0, Number(q.clicks) || 0);
-            return { ...q, clicks };
-          });
-        todosQRs.sort(compararQRs);
+        if (Array.isArray(serverQRs)) {
+          todosQRs = serverQRs
+            .filter(q => !deletedSlugsCache.has(String(q.slug).toLowerCase().trim()))
+            .map(q => {
+              const k = String(q.slug).toLowerCase().trim();
+              const clicks = Math.max(mergedClicks[k] || 0, Number(q.clicks) || 0);
+              return { ...q, clicks };
+            });
+          todosQRs.sort(compararQRs);
+        }
 
         // Mescla scans do servidor com o cache do localStorage para estabilidade serverless
         const existingScans = getStoredScans();
@@ -1407,6 +1413,8 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         filtrarQRs();
       } catch (err) {
         console.error("Erro ao carregar dados:", err);
+      } finally {
+        isFetchingDashboard = false;
       }
     }
 
@@ -2104,9 +2112,9 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     const selOrd = document.getElementById('select-ordenacao');
     if (selOrd) selOrd.value = ordenacaoAtual;
 
-    // Inicialização e Polling de Scans a cada 2.5s
+    // Inicialização e Polling de Scans a cada 3.5s
     carregarDashboard();
-    setInterval(carregarDashboard, 2500);
+    setInterval(carregarDashboard, 3500);
   </script>
 </body>
 </html>
@@ -2315,6 +2323,56 @@ def natural_sort_key(item: dict) -> tuple:
     return (parts, slug_parts)
 
 
+async def ensure_db_synced():
+    """Sincroniza atômica e confiavelmente o estado do banco em memória com o Redis."""
+    if not redis_async:
+        return
+    try:
+        stored_deletions = await redis_async.smembers("deleted_qr_slugs")
+        if stored_deletions:
+            DELETED_SLUGS.update(stored_deletions)
+        for d in list(DELETED_SLUGS):
+            IN_MEMORY_DB.pop(d, None)
+
+        raw_slugs = await redis_async.smembers("all_qr_slugs")
+        valid_slugs = []
+        for s in raw_slugs:
+            if s in DELETED_SLUGS or s == "rede-03-85c4":
+                IN_MEMORY_DB.pop(s, None)
+                try:
+                    await redis_async.srem("all_qr_slugs", s)
+                    await redis_async.delete(f"qr_meta:{s}")
+                    await redis_async.hdel("qr_clicks", s)
+                    await redis_async.sadd("deleted_qr_slugs", s)
+                except Exception:
+                    pass
+            else:
+                valid_slugs.append(s)
+
+        if valid_slugs:
+            meta_keys = [f"qr_meta:{s}" for s in valid_slugs]
+            try:
+                metas = await redis_async.mget(meta_keys)
+                for s, meta in zip(valid_slugs, metas):
+                    if meta:
+                        try:
+                            IN_MEMORY_DB[s] = json.loads(meta)
+                        except Exception:
+                            pass
+            except Exception as mget_err:
+                log.warning("Falha no mget do Redis, usando fallback gather: %r", mget_err)
+                async def fetch_one(slug):
+                    try:
+                        m = await redis_async.get(f"qr_meta:{slug}")
+                        if m:
+                            IN_MEMORY_DB[slug] = json.loads(m)
+                    except Exception:
+                        pass
+                await asyncio.gather(*(fetch_one(s) for s in valid_slugs), return_exceptions=True)
+    except Exception as exc:
+        log.warning("Falha ao sincronizar lista com Redis: %r", exc)
+
+
 @app.get("/api/qrcodes")
 async def list_qrcodes_api(
     request: Request,
@@ -2322,25 +2380,7 @@ async def list_qrcodes_api(
     status: Optional[str] = None,
     host_override: Optional[str] = None,
 ):
-    if redis_async:
-        try:
-            stored_deletions = await redis_async.smembers("deleted_qr_slugs")
-            if stored_deletions:
-                DELETED_SLUGS.update(stored_deletions)
-            stored_slugs = await redis_async.smembers("all_qr_slugs")
-            for s in stored_slugs:
-                if s in DELETED_SLUGS or s == "rede-03-85c4":
-                    IN_MEMORY_DB.pop(s, None)
-                    await redis_async.srem("all_qr_slugs", s)
-                    await redis_async.delete(f"qr_meta:{s}")
-                    await redis_async.hdel("qr_clicks", s)
-                    await redis_async.sadd("deleted_qr_slugs", s)
-                    continue
-                meta = await redis_async.get(f"qr_meta:{s}")
-                if meta:
-                    IN_MEMORY_DB[s] = json.loads(meta)
-        except Exception as exc:
-            log.warning("Falha ao sincronizar lista com Redis: %r", exc)
+    await ensure_db_synced()
 
     # Garante purga imediata de quaisquer slugs excluídos
     for d in list(DELETED_SLUGS):
@@ -2888,6 +2928,7 @@ async def activate_qr_api(slug: str, request: Request):
 
 @app.get("/api/export-batch/pdf-sheet")
 async def export_batch_pdf_sheet(request: Request, prefix: Optional[str] = None, status: Optional[str] = None):
+    await ensure_db_synced()
     slugs = [s for s in list(IN_MEMORY_DB.keys()) if s not in DELETED_SLUGS]
     if prefix:
         slugs = [s for s in slugs if s.startswith(prefix.strip().lower())]
@@ -2979,6 +3020,7 @@ async def export_batch_pdf_sheet(request: Request, prefix: Optional[str] = None,
 
 @app.get("/api/export-batch/csv")
 async def export_batch_csv(request: Request):
+    await ensure_db_synced()
     active_host = request.headers.get("host", "localhost")
     proto = "https" if IS_SERVERLESS or "vercel.app" in active_host else "http"
     output = io.StringIO()
